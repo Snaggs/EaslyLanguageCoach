@@ -1,0 +1,105 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 09/24/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : Tracking Legacy Trendlines using Vectors
+}
+
+{
+Concept:
+   Create and indicator that can find potential areas of support and resistance
+   Draw lines to show these levels
+   Break the line when price breaches it
+   Let user choose High and Low line colors
+   Let user choose Text Color for price
+   Let user show/hide price at pivot point
+   Let user configure strength of reversal
+}
+
+using elsystem.collections;
+
+input:
+    int iLStr(4),
+    int iRStr(4),
+    bool iShowPrice(true),
+    int iTextColor(LightGray),
+    int iPivotHighColor(Cyan),
+    int iPivotLowColor(Magenta);
+
+var:
+    int Idx(0),
+    int TextId(0),
+    double TLPrice(0),
+    int TLId(0),
+    
+    Vector PivotHighs(null),
+    Vector PivotLows(null);
+
+once
+begin
+    PivotHighs = new Vector();
+    PivotLows = new Vector();
+end;
+
+if BarStatus(1) = 2 then
+begin
+    // TL High endpoint management
+    for Idx = PivotHighs.Count - 1 downto 0
+    begin
+        // Get TL info
+        TLId = PivotHighs[Idx] astype int;
+        TLPrice = TL_GetValue(TLId, Date, Time);
+    
+        // Extend or truncate trendline
+        if High <= Round(TLPrice, 2) then
+            value1 = TL_SetEnd(TLId, Date, Time, TLPrice)
+        else
+            PivotHighs.Erase(Idx);
+    end;
+    
+    // TL Low endpoint management
+    for Idx = PivotLows.Count - 1 downto 0
+    begin
+        // Get TL info
+        TLId = PivotLows[Idx] astype int;
+        TLPrice = TL_GetValue(TLId, Date, Time);
+    
+        // Extend or truncate trendline
+        if Low >= ROund(TLPrice, 2) then
+            value1 = TL_SetEnd(TLId, Date, Time, TLPrice)
+        else
+            PivotLows.Erase(Idx);
+    end;
+    
+    // Pivot High TL and Text creation
+    if PivotHighVS(1, High, iLStr, iRStr, iRStr + 1) <> -1 then
+    begin
+        if iShowPrice then
+        begin
+            TextId = Text_New(Date[iRStr], Time[iRStr], High[iRStr], NumToStr(High[iRStr], 2));
+            value1 = Text_SetColor(TextId, iTextColor);
+            value1 = Text_SetStyle(TextId, 0, 1);
+        end;
+        
+        TLId = TL_New(Date[iRStr], Time[iRStr], High[iRStr], Date, Time, High[iRStr]);
+        value1 = TL_SetColor(TLId, iPivotHighColor);
+        
+        PivotHighs.Insert(0, TLId astype int);
+    end;
+    
+    // Pivot Low TL and Text creation
+    if PivotLowVS(1, Low, iLStr, iRStr, iRStr + 1) <> -1 then
+    begin
+        if iShowPrice then
+        begin
+            TextId = Text_New(Date[iRStr], Time[iRStr], Low[iRStr], NumToStr(Low[iRStr], 2));
+            value1 = Text_SetColor(TextId, iTextColor);
+            value1 = Text_SetStyle(TextId, 0, 0);
+        end;
+        
+        TLId = TL_New(Date[iRStr], Time[iRStr], Low[iRStr], Date, Time, Low[iRStr]);
+        value1 = TL_SetColor(TLId, iPivotLowColor);
+        
+        PivotLows.Insert(0, TLId astype int);
+    end;
+end;
