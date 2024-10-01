@@ -1,0 +1,221 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 09/30/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : Benefits of a naming convention
+}
+
+// This indicator is used to show naming conventions and parts of it weren't meant to verify.
+
+{
+    Inputs: iCapital, iPrice, iLength, iUpColor, iDownColor
+
+    Constants: MAX_INDEX, MIN_VALUE
+
+    Module level variables: mIdx, mStartDate, mEndDate, mOrderCount
+
+    Parameters: pPrice, pOrderType
+
+    Local variables: idx, startDate, endDate, count
+
+    Functions & Methods: CanTrade, CalcSharesToTrade
+
+    Studies & Strategies: PrintOrder, DrawText, LogData
+}
+
+
+{
+    Benefits of a naming convention:
+        Readability, Maintainability, Error Prevention, Self documenting code,
+        Prevents name collisions, Reduces variable shadowing
+        and Helps with scope identification
+
+    Create your own naming convention. Consistency is key! It may evolve over time.
+}
+
+
+// Using all lowercase
+using elsystem;
+using elsystem.io;
+using tsdata.trading;
+
+
+// Prefix with lowercase i for input followed by PascalCase
+var:
+    int iFastLength(9),
+    int iSlowLength(30);
+
+
+// All caps with underscore (snake_case)
+const:
+    int MAX_ROWS(50);
+
+
+// Prefix module level variables with a lowercase m
+var:
+    int mCount(0),
+    string Symbol("sym"),
+    int mCategory(-999),
+    double mPrice(0),
+    OrderTicket mOTBuyOrder(null);
+
+
+method OrderTicket CreateOrderTicket(string pName, string pSymbol, double pPrice, OrderType pType)
+
+var:
+    int idx,
+    string symbol,
+    OrderTicket ot;
+
+begin
+    print("Local symbol before: ", symbol);
+    symbol = "New value";
+    print("Local symbol after: ", symbol);
+
+
+#region OrderTicket
+    ot = new OrderTicket();
+    ot.name = pName;
+    ot.Symbol = pSymbol;
+    ot.LimitPrice = pPrice;
+    ot.Type = pType;
+
+    for idx = 0 to MAX_ROWS - 1 // Local and Constant
+    begin
+        if idx > iFastLength then begin end;                // Local and Input (Scope)
+        if pPrice crosses over iSlowLength then begin end;  // Parameter and Input (Scope)
+    end;
+#endregion
+
+
+#region Enumerations
+    // Avoid magic numbers.
+    if ot.Type = 3 then begin end;
+
+    if ot.Type = 3 then begin end;  // 3=StopLimit
+
+    // Use Enumerations instead
+    if ot.Type = OrderType.StopLimit then begin end;
+#endregion
+
+    return ot;
+end;
+
+
+once
+begin
+    ClearPrintLog;
+    mOTBuyOrder = CreateOrderTicket("BuyOrder", "symbol", Close, OrderType.StopLimit);
+    print("Symbol=", Symbol, ", Category=", Category:0:0);
+end;
+
+
+once
+begin
+    // Keys for dictionaries camelCase or snake_case, just be consistent
+    // AppStorage I consider global in scope to the chart. Doesn't include workspace or desktop.
+    AppStorage["tradingSymbol"] = Symbol;   // Name collision
+end;
+
+
+once
+begin
+    // Numerics
+    ActiveOrderCount
+    TerminalOrderCount
+    OpenPositions
+    MinutesToSessionEnd
+
+    // Strings
+    CurrentSymbol
+    EventMsg
+    ActiveAccount
+
+    // Collections
+    PivotLows
+    TerminalOrders
+    ActiveRectangles
+    OrderTypes
+    QueuedItems
+
+    // Dates
+    mStartDate
+    EndDate
+
+    // Use boolean names that resolve to true or false
+    CanTrade
+    IsReady
+    OrderReplaced
+
+    // Avoid vague names
+    Replaced
+    Opened
+    mClosed
+    OrderOk
+
+    // Use positive names
+    FileFound
+
+    // Negative names are harder to read and understand
+    NotFound
+    Unsuccessful
+    Failed
+
+
+    // When negating negative names, the code is harder to read
+    if Not NotFound then begin end;
+    if Not Unsuccessful then begin end;
+
+
+    // Positive names
+    IsFound
+    IsSuccussful
+    FileOpened
+
+
+    // Positive naming
+    if IsFound then begin end;
+    if IsSuccessful then begin end;
+    if FileOpened then begin end;
+
+
+    // Other good names
+    IsActive
+    HasPermission
+    ShouldClose
+    WasLoggedOut
+
+
+    // Names to avoid
+    Flag
+    Done
+    Found
+    Ok
+    File1, File2, File3
+    Val1, Val2, Val3    // Hard to tell the number one from a lowercase L
+
+
+    if Flag then begin end;
+    if Done then begin end;
+
+    if CanTrade then begin end;
+    if OrderSent then begin end;
+
+    // Avoid short abbreviations
+    if OS then begin end;
+
+    // Using pre-declared variables make code harder to understand
+    if Condition1 and Condition2 then begin end;
+
+    if File1Ok and not File2Closed then begin end;
+    if SourceFileOpen and TargetFileOpen then begin end;
+
+
+    // Method and Function names
+    ELCFormatAccount()
+    ELCFormatOptionSecurity()
+    
+    CanTrade()
+    IsConnected()
+    CloseProviders()
+end;
