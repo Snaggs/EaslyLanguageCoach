@@ -1,0 +1,90 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 10/17/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : Easily Define Event Handlers
+}
+
+{
+    Event Handlers are easy to define.
+    They are a void methods with only 2 parameters.
+    The first parameter is an object with the name of sender.
+    The second parameter is what we have to figure out.
+
+    For DataProviders (OrdersProvider, PositionsProvider, QuotesProvider, etc) there
+    are only 2 events that can be raised: 'StateChanged' and 'Updated'.
+}
+
+using elsystem;
+using elsystem.collections;
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+
+var:
+    QuotesProvider QP_Spy(null);
+
+method QuotesProvider CreateQuotesProvider(string pSymbol, string pFields)
+var:
+    QuotesProvider qp;
+
+begin
+    qp = new QuotesProvider();
+    qp.Symbol = pSymbol;
+    qp.Fields += pFields;
+    qp.Realtime = true;
+
+    // Events
+    qp.StateChanged += QP_StateChanged;
+    qp.Updated += QP_Updated;
+
+    return qp;
+end;
+
+method void QP_StateChanged(object sender, StateChangedEventArgs args)
+var:
+    QuotesProvider source;
+begin
+    source = sender astype QuotesProvider;
+
+    print("OldState=" + args.OldState.ToString() + ", NewState=" + args.NewState.ToString() +
+            ", Source.State=" + source.State.ToString());
+    print(" ");
+end;
+
+method void QP_Updated(object sender, QuoteUpdatedEventArgs args)
+var:
+    QuotesProvider source;
+begin
+    source = sender astype QuotesProvider;
+
+    switch args.Reason
+    begin
+        case QuoteUpdateReason.InitialUpdate:
+            print("Reason=" + args.Reason.ToString());
+
+        case QuoteUpdateReason.RealtimeUpdate:
+            // Check the Quote Datatype so we know what property the value will be in
+            if args.Quote.Type = DataType.DoubleVal then
+                print(source.Symbol + "[" + args.Field + "]=", args.Quote.DoubleValue:0:2);
+    end;
+end;
+
+method void AP_Updated(object sender, AccountUpdatedEventArgs args)
+begin end;
+
+method void SAP_Updated(object sender, SymbolAttributesUpdatedEventArgs args)
+begin end;
+
+method void Order_Updated(object sender, OrderUpdatedEventArgs args)
+begin end;
+
+method void GD_ItemProcessed(object sender, ItemProcessedEventArgs args)
+begin end;
+
+once
+begin
+    ClearPrintLog;
+    QP_Spy = CreateQuotesProvider("SPY", "bid,ask,last"); // Syntax is: "a,b,c", not "a","b","c"
+    QP_Spy.LoadProvider();
+end;
