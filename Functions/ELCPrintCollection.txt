@@ -1,0 +1,477 @@
+{  
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            ELCPrintCollection
+Type:            Function (simple)
+TS Version:        9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+This sample function is useful for printing the contents of a vector, dictionary, global dictionary,
+AppStorage and Orders.  The function is essentially recursive in that is will also print the contents
+of one of the collection objects that is inside another collection object.
+
+This function demonstrates the use of the istype to determine the type of an object.
+ 
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version        Task
+---------    --------    -------------------------------------------------------------------
+            01.00.00    * Created
+07/29/17    02.00.00    * Vector header
+12/09/17    03.00.00    * Support DrawingObjects
+06/29/19    04.00.00    * Formatting of datetimes
+12/02/19    04.01.00    * Enclose strings in quotes
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    -------------------------------------------------------------------
+07/29/17                Add TokenList support                         
+---------------------------------------------------------------------------------------------------
+}
+
+ 
+#region - Usings -
+using elsystem;
+using elsystem.collections;
+using elsystem.drawing;
+using elsystem.drawingobjects;
+
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+#endregion
+
+#region - Function Inputs -
+inputs:
+    string iCollName(stringsimple),        //    A name to associated with the initial collection
+    object iColl(objectsimple),            //    The top collection object
+    int iDepth(numericsimple),             //    Current depth - normally 0 for initial call
+    int iIndent(numericsimple);            //    Number of spaces to indent eavh level (collection within a collection)
+#endregion
+
+variables:
+    int UseDepth(0),
+    int UseIndent(4);
+
+#region - Utilities -
+method bool PrintCollection(string elcName, object elc, int depth)
+variables:
+    bool IsCollection;
+begin
+    //---------------------------------------------------------------------------------------------------
+    //    This method will print a collection (vector or dictionary or globaldictionary), including any 
+    //    collections held in items in the collection, as well as an Orders collection
+    //---------------------------------------------------------------------------------------------------
+    IsCollection = true;
+    
+    if elc <> null then
+    begin
+        if elc istype Dictionary then
+        begin
+            PrintDictionary(elcName, elc astype Dictionary, depth);
+        end
+        else if elc istype GlobalDictionary then
+        begin
+            PrintGlobalDictionary(elcName, elc astype GlobalDictionary, depth);
+        end
+        else if elc istype Vector then
+        begin
+            PrintVector(elcName, elc astype Vector, depth);
+        end
+        else if elc istype Orders then
+        begin
+            PrintOrders(elcName, elc astype Orders, depth);
+        end
+        else IsCollection = false;
+    end
+    else Iscollection = false;
+    
+    return IsCollection;
+end;
+
+method void PrintVector(string vectName, Vector vct, int depth)
+variables:
+    int Ndx;
+begin
+    for Ndx = 0 to vct.Count - 1
+    begin
+        
+        //---------------------------------------------------------------------------------------------------
+        //    Null in dictionary value
+        //---------------------------------------------------------------------------------------------------
+        if vct.Items[Ndx] = null then
+        begin
+            Print(Spaces(depth * UseIndent),
+                " Ndx=", Ndx:0:0, 
+                " ", vectName, 
+                " V=", "null");
+        end
+        
+        //---------------------------------------------------------------------------------------------------
+        //    Collection in dictionary value
+        //---------------------------------------------------------------------------------------------------
+        else if vct.Items[Ndx] istype Dictionary or vct.Items[Ndx] istype GlobalDictionary or vct.Items[Ndx] istype Vector then
+        begin
+            Print(Spaces(depth * UseIndent),
+                " Ndx=", Ndx:0:0); 
+            PrintCollection("", vct.Items[Ndx], depth + 1);
+        end
+        
+        //---------------------------------------------------------------------------------------------------
+        //    Value is an Order
+        //---------------------------------------------------------------------------------------------------
+        else if vct.Items[Ndx] istype Order then
+        begin
+            Print(Spaces(depth * UseIndent),
+                " Ndx=", Ndx:0:0); 
+            PrintOrder(vectName, string.Format("Ndx={0}", Ndx), vct.Items[Ndx] astype Order, depth + 1);
+        end
+            
+        //---------------------------------------------------------------------------------------------------
+        //    Value is a DrawingObject
+        //---------------------------------------------------------------------------------------------------
+        else if vct.Items[Ndx] istype DrawingObject then
+        begin
+            PrintDrawingObject(vectName, string.Format("Ndx={0}", Ndx), vct.Items[Ndx] astype DrawingObject, depth + 1);
+        end
+            
+        //---------------------------------------------------------------------------------------------------
+        //    Value is a DateTime
+        //---------------------------------------------------------------------------------------------------
+        else if vct.Items[Ndx] istype DateTime then
+        begin
+            Print(Spaces(depth * UseIndent),
+                " Ndx=",Ndx:0:0, 
+                " ", vectName, 
+                " V=", (vct.Items[Ndx] astype DateTime).Format("%m/%d/%Y %H:%M:%S"));
+        end
+
+        //---------------------------------------------------------------------------------------------------
+        //    Value type in dictionary value or a non-collection object
+        //---------------------------------------------------------------------------------------------------
+        else 
+        begin
+            if vct.Items[Ndx] istype string then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " Ndx=",Ndx:0:0, 
+                    " ", vectName, 
+                    " V=", DoubleQuote, vct.Items[Ndx].ToString(), DoubleQuote);
+            end
+            else
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " Ndx=",Ndx:0:0, 
+                    " ", vectName, 
+                    " V=", vct.Items[Ndx].ToString());
+            end;
+        end;
+    end;
+end;
+
+{
+Thie method can be used during debugging to print out a dictionary's contents
+}
+method void PrintDictionary(string dictName, Dictionary dtp, int depth)
+variables:
+    int Ndx,
+    string Key;
+begin
+    if dtp <> null then
+    begin
+        for Ndx = 0 to dtp.Count - 1
+        begin
+            Key = dtp.Keys[Ndx] astype string;
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Null in dictionary value
+            //---------------------------------------------------------------------------------------------------
+            if dtp[Key] = null then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", "null");
+            end
+            
+            else if dtp[Key] istype Vector then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", string.Format("VECTOR Cnt={0}", (dtp[Key] astype Vector).Count));
+                PrintCollection(Key, dtp[Key], depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Collection in dictionary value
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype Dictionary or dtp[Key] istype GlobalDictionary then
+            begin
+                PrintCollection(Key, dtp[Key], depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an Order
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[key] istype Order then
+            begin
+                PrintOrder(dictName, Key, dtp[Key] astype Order, depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an DrawingObject
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype DrawingObject then
+            begin
+                PrintDrawingObject(dictName, Key, dtp[Key] astype DrawingObject, depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an DateTime
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype DateTime then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", (dtp[Key] astype DateTime).Format("%m/%d/%Y %H:%M:%S"));
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is a string
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype string then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", DoubleQuote, dtp[Key].ToString(), DoubleQuote);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value type in dictionary value or a non-collection object
+            //---------------------------------------------------------------------------------------------------
+            else 
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", dtp[Key].ToString());
+            end;
+        end;
+    end;
+end;
+
+{
+Thie method can be used during debugging to print out a dictionary's contents
+}
+method void PrintGlobalDictionary(string dictName, GlobalDictionary dtp, int depth)
+variables:
+    int Ndx,
+    string Key;
+begin
+    if dtp <> null then
+    begin
+        for Ndx = 0 to dtp.Count - 1
+        begin
+            Key = dtp.Keys[Ndx] astype string;
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Null in dictionary value
+            //---------------------------------------------------------------------------------------------------
+            if dtp[Key] = null then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", "null");
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Collection in dictionary value
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype Dictionary or dtp[Key] istype GlobalDictionary or dtp[Key] istype Vector then
+            begin
+                PrintCollection(Key, dtp[Key], depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an Order
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[key] istype Order then
+            begin
+                PrintOrder(dictName, Key, dtp[Key] astype Order, depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an DrawingObject
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype DrawingObject then
+            begin
+                PrintDrawingObject(dictName, Key, dtp[Key] astype DrawingObject, depth + 1);
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is an DateTime
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype DateTime then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", (dtp[Key] astype DateTime).Format("%m/%d/%Y %H:%M:%S"));
+            end
+            
+            //---------------------------------------------------------------------------------------------------
+            //    Value is a string
+            //---------------------------------------------------------------------------------------------------
+            else if dtp[Key] istype string then
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", DoubleQuote, dtp[Key].ToString(), DoubleQuote);
+            end
+                
+            //---------------------------------------------------------------------------------------------------
+            //    Value type in dictionary value or a non-collection object
+            //---------------------------------------------------------------------------------------------------
+            else 
+            begin
+                Print(Spaces(depth * UseIndent),
+                    " ", dictName, 
+                    " K=", Key,
+                    " V=", dtp[Key].ToString());
+            end;
+        end;
+    end;
+end;
+#endregion
+ 
+method void PrintOrders(string ordersName, Orders ords, int depth)
+variables:
+    int Ndx,
+    Order Ord;
+begin
+        for Ndx = 0 to Ords.Count - 1
+        begin
+            Ord = ords.Order[Ndx];
+            PrintOrder(ordersName, string.Format("Ndx={0}", Ndx), ord, depth + 1);
+        end;
+end;
+
+method void PrintOrder(string dictName, string key, Order ord, int depth)
+variables:
+    string OrdText;
+begin
+    OrdText = string.Format("OID={0} {9} {1} {2} {3} Qty={4} LP={5} SP={6} ST={7}/{8} Dur={10} PID={11} GID={12}",
+        ord.OrderId, 
+        ord.Symbol, 
+        ord.Action.ToString(), 
+        ord.Type.ToString(), 
+        ord.EnteredQuantity,
+        ord.LimitPrice, 
+        ord.StopPrice,
+        ord.State.ToString(),
+        ord.StateDetail.ToString(),
+        ord.AccountID,
+        ord.Duration.ToString(),
+        ord.OSOParentID,
+        ord.OCOGroupID);
+        
+    Print(Spaces({depth * }UseIndent),
+        " ", dictName, 
+        " ", Key,
+        " Order:", OrdText);
+end;
+
+method void PrintDrawingObject(string dictName, string key, DrawingObject dobj, int depth)
+variables:
+    string DOType,
+    string DOText,
+    int Ndx;
+begin
+    DOText = string.Format("{0} {1} L={2} P={3} {4} SG={5}",
+        dobj.GetType().ToString(),
+        dobj.Name,
+        dobj.Lock,
+        dobj.Persist,
+        dobj.Color.ToString(),
+        dobj.ShowInPlotSubgraph);
+        
+    for Ndx = 0 to dobj.Count - 1
+    begin
+        DOText = DOText + " " + FormatDOPoint(dobj.Points[Ndx]);    
+    end;
+    
+    //---------------------------------------------------------------------------------------------------
+    //    Type-specific properties    
+    //---------------------------------------------------------------------------------------------------
+    DOType = dobj.GetType().ToString().ToLower();
+    
+    //---------------------------------------------------------------------------------------------------
+    //    trendline
+    //---------------------------------------------------------------------------------------------------
+    if DOType.Contains("trendline") then
+    begin
+        DOText = DOText + string.Format(" {0} {1}",
+            (dobj astype TrendLine).Style.ToString(), (dobj astype TrendLine).Weight.ToString());
+    end;
+    
+    //---------------------------------------------------------------------------------------------------
+    //    TextLabel
+    //---------------------------------------------------------------------------------------------------
+    if DOType.Contains("textlabel") then
+    begin
+        DOText = DOText + string.Format(" {0} {1}",
+            (dobj astype TextLabel).HStyle.ToString(), (dobj astype TextLabel).VStyle.ToString());
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Print It
+    //---------------------------------------------------------------------------------------------------
+    Print(Spaces({depth * }UseIndent),
+        " ", dictName, 
+        " ", Key,
+        " DO:", DOText);
+    
+end;
+
+method string FormatDOPoint(DOPoint dop)
+variables:
+    string PtTxt;
+begin
+    PtTxt = "";
+    switch dop.PointType.ToString().ToLower()
+    begin
+        case "datetimepoint":
+            PtTxt = string.Format("DTP: {0}@{1}",
+                (dop astype DTPoint).DateTimeOfBar.Format("%m/%d/%y %H:%M:%S"),
+                dop.Price);
+        case "barnumberpoint":
+            PtTxt = string.Format("BNP: {0}@{1}",
+                (dop astype BNPoint).BarNumber,
+                dop.Price);
+        case "pixelpoint":
+            PtTxt = string.Format("DTP: {0}/{1}",
+                (dop astype XYPoint).X,
+                (dop astype XYPoint).Y);
+    end;
+    return PtTxt;
+end;
+
+//    Ensure depth and indent are reasonable
+UseDepth = iDepth;
+UseIndent = iIndent;
+if iDepth <= 0 or iDepth >20 then UseDepth = 0;
+if iIndent < 0 or iIndent > 10 then UseIndent = 4;
+
+if iColl <> null then
+ELCPrintCollection = PrintCollection(iCollName, iColl, UseDepth);
