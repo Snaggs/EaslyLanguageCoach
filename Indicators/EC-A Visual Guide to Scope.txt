@@ -1,0 +1,93 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 10/26/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : A Visual Guide to Scope
+}
+
+{
+    I consider EasyLanguage to have 3 scope levels for variables
+    Local:
+        Method parameters and variables
+        Access  : Can only be used inside the method
+        Lifetime: Inside the method and lose their value
+                    when the method exits
+
+    Module:
+        Variables at the main level
+        Access  : Other module level variables and inside a method
+        Lifetime: As long as the App is running
+
+    Global:
+        Values in AppStorage
+        Access  : Anywhere in the App, Method or Function
+        Lifetime: Until they are cleared
+
+    Notes:
+        AppStorage can be used in local and module level scope,
+        but the data inside of it can span globally across methods
+        referenced by this indicator.
+}
+
+
+input:
+    int iX(1);   // Module scope
+
+var:
+    bool mPrintMsgs(false),
+    int mY(2),   // Module scope
+    int mZ(10);
+
+
+method void Foo(int pParm {Local scope})
+var:
+    int y,  //intrabarpersist doesn't work in a method
+    int z;  // Local scope
+begin
+    
+    // Update and print a local variable in a method
+    z += pParm;
+    print(z, pParm);
+
+    // Print module level data from a method
+    print(iX, mY);
+
+    // Print and set AppStorage data from a method
+    print(AppStorage["orderId"] astype int);
+    AppStorage["orderId"] = 20 astype int;
+    
+    print(" ");
+end;
+
+once
+begin
+    ClearPrintLog;
+
+    print(iX, mY);
+    
+    // We can't access the internal variables of a method
+    // from module scope.
+    //print(X, parm);
+
+    // Update and print AppStorage values
+    AppStorage["orderId"] = 10 astype int;
+    print(AppStorage["orderId"] astype int);
+
+    // Show persistance across method calls
+    print(mZ);
+    Foo(4);
+    print(mZ);
+    Foo(5);
+    print(mZ);
+
+    value1 = EC_AVisualGuideToScope(10);
+
+    // Print global data in AppStorage from module level scope
+    print(AppStorage["orderId"] astype int);
+
+    // How I use AppStorage for global settings
+    AppStorage["printMsgs"] = mPrintMsgs;
+
+    // TradeStation's ELCPrintCollection function
+    condition1 = ELCPrintCollection("AppStorage", AppStorage, 0 , 3);
+end;

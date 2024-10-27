@@ -1,0 +1,22 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 10/26/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : A Visual Guide to Scope
+}
+
+
+input:
+    int iLength(NumericSimple);
+
+var:
+    bool mPrintMsgs(false);
+
+// How I use AppStorage for global settings
+if AppStorage.Contains("printMsgs") then
+    mPrintMsgs = AppStorage["printMsgs"] astype bool;
+
+if mPrintMsgs then
+    print("Debug enabled...");
+
+EC_AVisualGuideToScope = 0;
