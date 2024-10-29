@@ -65,7 +65,7 @@ begin
         TLPrice = TL_GetValue(TLId, Date, Time);
     
         // Extend or truncate trendline
-        if Low >= ROund(TLPrice, 2) then
+        if Low >= Round(TLPrice, 2) then
             value1 = TL_SetEnd(TLId, Date, Time, TLPrice)
         else
             PivotLows.Erase(Idx);
