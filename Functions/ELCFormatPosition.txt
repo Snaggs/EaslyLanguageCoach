@@ -1,0 +1,103 @@
+#region - Documentation -
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            ELCFormatPosition
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Formats basic account information into a string
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+04/25/19    01.00.00    Created by TradeStation
+06/16/19    02.00.00    Removed unused datetime constants
+07/08/19    03.00.00    Add AEP label
+04/27/21    04.00.00    Formatted both format strings with different spacing and formatting
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+#endregion
+
+#region - Usings -
+using elsystem;
+
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+#endregion
+
+inputs:
+    Position iPosition(objectRef),
+    int iDecimalPlaces(numericSimple),
+    bool iShowPL(truefalsesimple),
+    bool iShowCost(truefalsesimple),
+    bool iShowMargin(truefalsesimple);
+
+variables:
+    string Formatted("");
+
+
+#region - Format Order -
+//---------------------------------------------------------------------------------------------------
+//    Construct a string to show Order properties
+//---------------------------------------------------------------------------------------------------
+Formatted = "*ERROR-INPUT";
+
+if iPosition <> null and iPosition istype Position then
+begin
+    //---------------------------------------------------------------------------------------------------
+    //    Basic Order Information
+    //---------------------------------------------------------------------------------------------------
+    Formatted = string.Format("PID={0} {1} {2,-5} Qty={3,3} AEP={4,9:N2} ",
+                            iPosition.PositionId,
+                            iPosition.AccountId,
+                            iPosition.Symbol,
+                            iPosition.Quantity,
+                            iPosition.AveragePrice);
+
+    if iShowPL then
+    begin
+        Formatted = Formatted
+            + string.Format("PL: O={0,9:C2} /Q={1,9:C2} %={2,5:N2} ",
+                iPosition.OpenPL,
+                iPosition.PLPerQuantity,
+                iPosition.PercentPL);
+    end;
+
+    if iShowCost then
+    begin
+        Formatted = Formatted
+            + string.Format("O$={0:F2} T$={1:F2} MV={2:C2} ",
+                iPosition.OriginalCost,
+                iPosition.TotalCost,
+                iPosition.MarketValue);
+    end;
+
+    if iShowMargin then
+    begin
+        Formatted = Formatted
+            + string.Format("IM={0:C2} MM={1:C2}",
+                iPosition.InitialMargin,
+                iPosition.MaintenanceMargin);
+    end;
+end;
+#endregion
+
+ELCFormatPosition = Formatted;
+//---------------------------------------------------------------------------------------------------
+//    END OF CODE
+//---------------------------------------------------------------------------------------------------

@@ -1,0 +1,98 @@
+#region - Documentation -
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            ELCFormatGeneratingApplication
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Converts full generation application enumerated value to a shorter string code
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+11/26/17    01.00.00    Created by TradeStation
+12/08/17    02.00.00    Remove istype check
+12/23/18    03.00.00    Create ELC copy
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+#endregion
+
+#region - Usings -
+using elsystem;
+
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+#endregion
+
+inputs:
+    GeneratingApplication iGA(objectsimple);
+
+variables:
+    string Formatted("");
+
+#region - Convert GeneratingApplication to Code -
+Formatted = "#ERROR";
+
+if true then
+begin
+    switch iGA
+    begin
+        case GeneratingApplication.AccountManager:
+            Formatted = "AM";
+        case GeneratingApplication.Automation:
+            Formatted = "AUTO";
+        case GeneratingApplication.ChartTrading:
+            Formatted = "CT";
+        case GeneratingApplication.CustomTradeBar:
+            Formatted = "CTB";
+        case GeneratingApplication.ListTrader:
+            Formatted = "LT";
+        case GeneratingApplication.Macro:
+            Formatted = "MACRO";
+        case GeneratingApplication.MarketDepth:
+            Formatted = "MD";
+        case GeneratingApplication.Matrix:
+            Formatted = "MTX";
+        case GeneratingApplication.ObjectModel:
+            Formatted = "OM";
+        case GeneratingApplication.OptionStation:
+            Formatted = "OS";
+        case GeneratingApplication.OrderBar:
+            Formatted = "OB";
+        case GeneratingApplication.ParkOrder:
+            Formatted = "PO";
+        case GeneratingApplication.PlaceOrderMacros:
+            Formatted = "POM";
+        case GeneratingApplication.RadarScreen:
+            Formatted = "RS";
+        case GeneratingApplication.StrategyNetwork:
+            Formatted = "SN";
+        case GeneratingApplication.StrategyNetworkAutomation:
+            Formatted = "SNA";
+        case GeneratingApplication.Unknown:
+            Formatted = "UNK";
+        default:
+            Formatted = numtostr(iGA astype int, 0);
+    end;
+end;
+#endregion
+
+ELCFormatGeneratingApplication = Formatted;
+//---------------------------------------------------------------------------------------------------
+//    END OF CODE
+//---------------------------------------------------------------------------------------------------

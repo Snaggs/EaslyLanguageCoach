@@ -1,0 +1,259 @@
+#region - Documentation -
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            ELCFormatOrderTicket
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Formats an OrderTicket properties into a string.
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+12/06/17    01.00.00    Created by TradeStation
+12/08/17    02.00.00    Fix Limit and Stop format conditions
+01/17/18    03.00.00    Expanded properties displayed
+07/05/18    04.00.00    Algo properties
+08/08/18    05.00.00    Fix format string error
+                        Check for TSAlgo Route for printing TSAlgo information
+04/22/19    06.00.00    Added PriceActivationRules
+07/20/22    06.00.01    Added OrderName
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+#endregion
+
+#region - Usings -
+using elsystem;
+
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+#endregion
+
+inputs:
+    OrderTicket iOrderTicket(objectRef),
+    int iDecimalPlaces(numericsimple);
+
+constants:
+    //---------------------------------------------------------------------------------------------------
+    //    Common constants
+    //---------------------------------------------------------------------------------------------------
+    string MDYHMSFormat("%m/%d/%y %H:%M:%S"),
+    string HMSFormat("%H:%M:%S"),
+    string MDYFormat("%m/%d/%y");
+
+variables:
+    string DTFilled(""),
+    string DT(""),
+    string Formatted(""),
+    string Work(""),
+    TokenList TL(null),
+    int NdxPAR(0),
+    PriceActivationRule PAR(null),
+    string PARDesc("");
+
+method string TranslateComparisonOperator(ComparisonOperator co)
+begin
+    switch co
+    begin
+        case ComparisonOperator.Greater:
+            return ">";
+        case ComparisonOperator.GreaterEqual:
+            return ">=";
+        case ComparisonOperator.Less:
+            return "<";
+        case ComparisonOperator.LessEqual:
+            return "<=";
+        default:
+            return "?";
+    end;
+end;
+
+once
+begin
+    TL = TokenList.Create("POV-ALGO,TWAP-ALGO,VWAP-ALGO,SWEEPPI-ALGO,SWEEP-ALGO");
+end;
+
+#region - Format OrderTicket -
+//---------------------------------------------------------------------------------------------------
+//    Construct a string to show Order properties
+//---------------------------------------------------------------------------------------------------
+Formatted = "*ERROR-INPUT";
+
+if iOrderTicket <> null and iOrderTicket istype OrderTicket then
+begin
+
+    Formatted = string.Format("{0} {1} {2} {3} {4} Qty={5} {6} Nm={7} Ord={8} ",
+        iOrderTicket.Account,
+        iOrderTicket.Symbol,
+        iOrderTicket.SymbolType.ToString(),
+        iOrderTicket.Type.ToString(),
+        iOrderTicket.Action.ToString(),
+        iOrderTicket.Quantity,
+        iOrderTicket.Duration,
+        iOrderTicket.Name,
+        iOrderTicket.OrderName);
+
+    if iOrderTicket.LimitPrice <> 0
+        or iOrderTicket.LimitPriceOffset <> 0
+        or iOrderTicket.LimitPriceStyle <> PriceStyle.None then
+    begin
+        Formatted = Formatted
+            + string.Format("LP={0}({1}:{2}) ",
+                            numtostr(iOrderTicket.LimitPrice, iDecimalPlaces),
+                            iOrderTicket.LimitPriceStyle.ToString(),
+                            iOrderTicket.LimitPriceOffset);
+    end;
+
+    if iOrderTicket.StopPrice <> 0
+        or iOrderTicket.StopPriceOffset <> 0
+        or iOrderTicket.StopPriceStyle <> PriceStyle.None then
+    begin
+        Formatted = Formatted
+            + string.Format("SP={0}({1}:{2}) ",
+                            numtostr(iOrderTicket.StopPrice, iDecimalPlaces),
+                            iOrderTicket.StopPriceStyle.ToString(),
+                            iOrderTicket.StopPriceOffset);
+    end;
+
+    if iOrderTicket.TrailingStop <> TrailingStopBehavior.Off then
+    begin
+        Formatted = Formatted
+            + String.Format("Trl={0}:{1} ",
+                            iOrderTicket.TrailingStop.ToString(),
+                            iOrderTicket.TrailingStopAmount);
+    end;
+
+    if iOrderTicket.Discretionary then
+    begin
+        Formatted = Formatted  + string.Format("DiscAmt={0} ", iOrderTicket.DiscretionaryAmount);
+    end;
+
+    if iOrderTicket.IfTouched then
+    begin
+        Formatted = Formatted
+            + string.Format("IfTch:P={0} Off={1} ",
+                            numtostr(iOrderTicket.IfTouchedPrice, iDecimalPlaces),
+                            iOrderTicket.IfTouchedPriceOffset);
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Time Activation/Deactivation Rules
+    //---------------------------------------------------------------------------------------------------
+    if iOrderTicket.ActivationRules.UseActivationTime then
+    begin
+        DT = "";
+        if iOrderTicket.ActivationRules.ActivationTime <> null then
+            DT = iOrderTicket.ActivationRules.ActivationTime.format(HMSFormat);
+        Formatted = Formatted + string.Format("ActTime={0} ", DT);
+    end;
+
+    if iOrderTicket.ActivationRules.UseDeactivationTime then
+    begin
+        DT = "";
+        if iOrderTicket.ActivationRules.DeactivationTime <> null then
+            DT = iOrderTicket.ActivationRules.DeactivationTime.format(HMSFormat);
+        Formatted = Formatted + string.Format("DeactTime={0} ", DT);
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Price Activation Rules
+    //---------------------------------------------------------------------------------------------------
+    if iOrderTicket.ActivationRules.Rules.Count > 0 then
+    begin
+        for NdxPAR = 0 to iOrderTicket.ActivationRules.Rules.Count - 1
+        begin
+            PAR = iOrderTicket.ActivationRules.Rules[NdxPAR];
+            PARDesc = string.Format("PAR {0}: {1} {2} {3} {4} {5} ",
+                NdxPar, PAR.Name, PAR.Symbol, TranslateComparisonOperator(PAR.ComparisonOperator), PAR.Price, PAR.Trigger.ToString().ToUpper());
+            Formatted = Formatted + PARDesc;
+        end;
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Extra rarely used properties
+    //---------------------------------------------------------------------------------------------------
+    if iOrderTicket.AllOrNone then Formatted = Formatted + "AON ";
+    if iOrderTicket.BookOnly then Formatted = Formatted + "BO ";
+    if iOrderTicket.BuyMinusSellPlus then Formatted = Formatted + "BMSP ";
+    if iOrderTicket.ConvertInvalidStopToMarket then Formatted = Formatted + "CISTM ";
+
+    if iOrderTicket.ECNSweep then Formatted = Formatted + "ECN ";
+    if iOrderTicket.NonDisplay then Formatted = Formatted + "ND ";
+    if iOrderTicket.Peg <> PegBehavior.Off then Formatted = Formatted + "PEG=" + iOrderTicket.Peg.ToString() + " ";
+    if iOrderTicket.PostOnly then Formatted = Formatted + "PO ";
+    if iOrderTicket.Route <> "" then Formatted = Formatted + "Route=" + iOrderTicket.Route + " ";
+    if iOrderTicket.ShowOnly then Formatted = Formatted + "SO ";
+    if iOrderTicket.ShowOnlyQuantity <> 0 then Formatted = Formatted + numtostr(iOrderTicket.ShowOnlyQuantity, 0) + " ";
+
+
+    //---------------------------------------------------------------------------------------------------
+    //    Algo Properties
+    //---------------------------------------------------------------------------------------------------
+    if TL.Contains(iOrderTicket.Route.Trim().ToUpper()) then
+    begin
+        if iOrderTicket.StartTime <> null
+            or iOrderTicket.EndTime <> null
+            or iOrderTicket.ExecutionStyle <> 0            //    Default is 5
+            or iOrderTicket.MaxPercentVolume <> 99        //    This is the default value for some reason
+            or iOrderTicket.MinPercentVolume <> 0 then
+        begin
+            Work = "";
+            if iOrderTicket.StartTime <> null then
+            begin
+                Work = Work + string.format("Start: {0:HH:mm:ss}-", iOrderTicket.StartTime);
+            end;
+
+            if iOrderTicket.EndTime <> null then
+            begin
+                Work = Work + string.format("End: {0:HH:mm:ss} ", iOrderTicket.EndTime);
+            end;
+
+            if iOrderTicket.ExecutionStyle <> 0 then
+            begin
+                switch iOrderTicket.ExecutionStyle
+                begin
+                    case 2:
+                        Work = Work + "Passive ";
+                    case 5:
+                        Work = Work + "Normal ";
+                    case 8:
+                        Work = Work + "Aggressive ";
+                end;
+            end;
+
+            if iOrderTicket.MinPercentVolume <> 0 then
+            begin
+                Work = Work + string.Format("MinVol={0} ", iOrderTicket.MinPercentVolume);
+            end;
+
+            if iOrderTicket.MaxPercentVolume <> 0 then
+            begin
+                Work = Work + string.Format("MaxVol={0} ", iOrderTicket.MaxPercentVolume);
+            end;
+
+            Formatted = Formatted + Work;
+        end;
+    end;
+
+end;
+#endregion
+
+ELCFormatOrderTicket = Formatted;
+//---------------------------------------------------------------------------------------------------
+//    END OF CODE
+//---------------------------------------------------------------------------------------------------

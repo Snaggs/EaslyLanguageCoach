@@ -1,0 +1,295 @@
+#region - Documentation -
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            ELCFormatOrder
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Formats basic order information into a string
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    -------------------------------------------------------------------
+11/26/17    01.00.00    Created by TradeStation
+12/07/17    01.01.00    Split to minimize amount formatted and fix
+12/08/17    01.02.00    Fix stop and limit format condition
+12/29/17    01.03.00    Separate quantities into conditional prints
+01/06/17    01.04.00    Shorted message
+02/23/18    01.05.00    ELC copy
+09/12/18    01.06.00    AON
+04/23/19    01.07.00    Add option to not show Advanced Options
+                        Drop PadRight method in favor of string.Format
+05/07/19    01.08.00    Formatting of prices with decimal places
+06/17/19    01.08.01    Improve spacing
+                        SP Style and Offset cleanup
+            01.08.02    FILLED
+                        Left Justify Action and Type
+07/10/19    01.09.00    Reordered fields
+            01.09.01    Add trim() to return value
+07/20/22    01.09.02    Added OrderName
+01/27/24    01.09.03    Added SpreadName, changed comment from account to order in doc section
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+#endregion
+
+#region - Usings -
+using elsystem;
+
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+#endregion
+
+inputs:
+    Order iOrder(objectRef),
+    int iDecimalPlaces(numericSimple),
+    bool iShowAdvOptions(truefalsesimple);
+
+constants:
+    //---------------------------------------------------------------------------------------------------
+    //    Common constants
+    //---------------------------------------------------------------------------------------------------
+    string MDYHMSFormat("%m/%d/%y %H:%M:%S"),
+    string HMSFormat("%H:%M:%S"),
+    string MDYFormat("%m/%d/%y");
+
+variables:
+    string DecPlcs("5"),
+    string F#("F5"),
+    string Formatted(""),
+    string FDT(""),
+    int Idx(0),
+    string OA(""),
+    string OT(""),
+    string Msg("");
+
+
+#region - Format Order -
+//---------------------------------------------------------------------------------------------------
+//    Construct a string to show Order proerties
+//---------------------------------------------------------------------------------------------------
+Formatted = "*ERROR-INPUT";
+DecPlcs = numtostr(iDecimalPlaces, 0);
+F# = "F" + DecPlcs;
+
+if iOrder <> null and iOrder istype Order then
+begin
+    //---------------------------------------------------------------------------------------------------
+    //    Abbreviate Action and Type
+    //---------------------------------------------------------------------------------------------------
+    switch iOrder.Action
+    begin
+        case OrderAction.Buy:
+            OA = "BUY";
+        case OrderAction.BuyToCover:
+            OA = "BTC";
+        case OrderAction.Sell:
+            OA = "SELL";
+        case OrderAction.SellShort:
+            OA = "SS";
+        case OrderAction.Unknown:
+            OA = "UNK";
+        case OrderAction.Custom:
+            OA = "CST";
+    end;
+
+    switch iOrder.Type
+    begin
+        case OrderType.Limit:
+            OT = "LMT";
+        case OrderType.Market:
+            OT = "MKT";
+        case OrderType.StopLimit:
+            OT = "STPLMT";
+        case OrderType.StopMarket:
+            OT = "STPMKT";
+        case OrderType.Unknown:
+            OT = "UNK";
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Basic Order Information
+    //---------------------------------------------------------------------------------------------------
+    Formatted = string.Format("OID={0,-11} {1} {2} {3,-4} {4,-6} OrdNm={5} ",
+                            iOrder.OrderId,        //    Want blanks if not present yet
+                            iOrder.AccountId,
+                            iOrder.Symbol,
+                            OA,
+                            OT,
+                            iOrder.OrderName);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Spread name
+    //---------------------------------------------------------------------------------------------------
+    Formatted = Formatted + string.Format("SprdNm={0} ", iOrder.SpreadName);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Leg count
+    //---------------------------------------------------------------------------------------------------
+    Formatted = Formatted + string.Format("LegCnt={0} ", iOrder.LegCount);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Quantities
+    //---------------------------------------------------------------------------------------------------
+    Formatted = Formatted + string.Format("EQ={0,-2} ", iOrder.EnteredQuantity);
+    Formatted = Formatted + string.Format("FQ={0,-2} ", iOrder.FilledQuantity);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Duration
+    //---------------------------------------------------------------------------------------------------
+    Formatted = Formatted
+            + string.Format("{0} ", iOrder.Duration);
+
+    //---------------------------------------------------------------------------------------------------
+    //    States
+    //---------------------------------------------------------------------------------------------------
+    Msg = string.Format("St={0}/{1} ",
+                            iOrder.State.ToString(),
+                            iOrder.StateDetail.ToString());
+    if iOrder.State = OrderState.Filled then Msg = Msg.ToUpper();
+    Formatted = Formatted + Msg;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Parent and OCOGroup IDs
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.OSOParentID <> "" then Formatted = Formatted + string.Format("PID={0} ",iOrder.OSOParentID);
+    if iOrder.OCOGroupID <> "" then Formatted = Formatted + string.Format("GID={0} ",iOrder.OCOGroupID);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Avg Filled Price
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.AvgFilledPrice <> 0 then
+    begin
+        Formatted = Formatted
+            + string.Format("AFP={0} ", numtostr(iOrder.AvgFilledPrice, iDecimalPlaces + 1));
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Limit Price
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.LimitPrice <> 0
+        or iOrder.LimitPriceOffset <> 0
+        or iOrder.LimitPriceStyle <> PriceStyle.None then
+    begin
+        Formatted = Formatted + string.Format("LP={0:F#} ".Replace("F#", F#), iOrder.LimitPrice);
+        if iOrder.LimitPriceOffset <> 0
+            or iOrder.LimitPriceStyle <> PriceStyle.None then
+        begin
+            Formatted = Formatted
+                + string.Format("({0}:{1})",
+                    iOrder.LimitPriceStyle.ToString(),
+                    iOrder.LimitPriceOffset);
+        end;
+        Formatted = Formatted + " ";
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Stop Price
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.StopPrice <> 0
+        or iOrder.StopPriceOffset <> 0
+        or iOrder.StopPriceStyle <> PriceStyle.None then
+    begin
+        Formatted = Formatted + string.Format("SP={0:F#} ".Replace("F#", F#), iOrder.StopPrice);
+        if iOrder.StopPriceOffset <> 0
+            or iOrder.StopPriceStyle <> PriceStyle.None then
+        begin
+            Formatted = Formatted
+                + string.Format("({0}:{1}) ",
+                    iOrder.StopPriceStyle.ToString(),
+                    iOrder.StopPriceOffset);
+        end;
+        Formatted = Formatted + " ";
+    end;
+
+    Formatted = Formatted
+            + string.Format("EDT={0} ", iOrder.EnteredTime.Format(MDYHMSFormat));
+
+    //---------------------------------------------------------------------------------------------------
+    //    FilledTime
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.FilledTime <> null then
+    begin
+        FDT = iOrder.FilledTime.Format(MDYHMSFormat);
+        if FDT.Trim().Length > 0 then
+        begin
+            Formatted = Formatted + string.Format("FDT={0} ", FDT);
+        end;
+    end;
+
+
+    //---------------------------------------------------------------------------------------------------
+    //    AllOrNone
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.AllOrNone then
+    begin
+        Formatted = Formatted + "AON ";
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    Generation Application
+    //---------------------------------------------------------------------------------------------------
+    Formatted = Formatted
+            + string.Format("GA={0} ", ELCFormatGeneratingApplication(iOrder.GeneratingApplication));
+
+    //---------------------------------------------------------------------------------------------------
+    //    Activation times
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.ActivationRules <> null then
+    begin
+        if iOrder.ActivationRules.ActivationTime <> null
+            and iOrder.ActivationRules.UseActivationTime
+            and iOrder.ActivationRules.ActivationTime.Format(HMSFormat).Trim().Length > 0 then
+        begin
+            Formatted = Formatted+ " ActTime=" +iOrder.ActivationRules.ActivationTime.Format(HMSFormat) + " ";
+        end;
+
+        if iOrder.ActivationRules.DeactivationTime <> null
+            and iOrder.ActivationRules.UseDeactivationTime
+            and iOrder.ActivationRules.DeactivationTime.Format(HMSFormat).Trim().Length > 0 then
+        begin
+            Formatted = Formatted+ " DeactTime=" +iOrder.ActivationRules.DeactivationTime.Format(HMSFormat) + " ";
+        end;
+    end;
+
+    //---------------------------------------------------------------------------------------------------
+    //    TODO - PAR if ever present
+    //---------------------------------------------------------------------------------------------------
+
+    //---------------------------------------------------------------------------------------------------
+    //    Trailing Stop Info
+    //---------------------------------------------------------------------------------------------------
+    if iOrder.TrailingStop <> TrailingStopBehavior.Off then
+        Formatted = Formatted + string.Format("Trl:{0}({1}:{2}) ",
+                                iOrder.TrailingStop.ToString(),
+                                iOrder.TrailingStopAmount,
+                                iOrder.TrailingStopValue);
+
+    //---------------------------------------------------------------------------------------------------
+    //    Advanced Options
+    //---------------------------------------------------------------------------------------------------
+    if iShowAdvOptions and iOrder.AdvanceOptions.Length > 0 then
+    begin
+        Formatted = Formatted + string.Format("Adv: {0} ", iOrder.AdvanceOptions);
+    end;
+end;
+#endregion
+
+ELCFormatOrder = Formatted.Trim();
+//---------------------------------------------------------------------------------------------------
+//    END OF CODE
+//---------------------------------------------------------------------------------------------------
