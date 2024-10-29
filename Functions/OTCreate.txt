@@ -47,6 +47,7 @@ Date        Version     Task
 08/07/22    01.00.04    Snaggs - Set routing to Intelligent and other non-common properties to
                                  their default values.
 12/01/22    01.00.05    Snaggs - Capped Order.OrderName to 15 characters
+10/29/24    01.01.00    Snaggs - Updated naming convention on module level variables
 
 ---------------------------------------------------------------------------------------------------
 TO DO LIST
@@ -75,10 +76,10 @@ input:
     OrderTicket oOrdTicket(ObjectRef);
 
 var:
-    bool PrintMsgs(false),
-    bool PrintOT(false),
+    bool mPrintMsgs(false),
+    bool mPrintOT(false),
 
-    double tickSize(MinMove / PriceScale);
+    double mTickSize(MinMove / PriceScale);
 
 
 //--------------------------------------------------------------------------------
@@ -123,7 +124,7 @@ begin
 
             default:
                 msg = string.Format("WARNING: Unknown order ticket action '{0}'.  No order ticket was created.", pAction);
-                value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+                value1 = LogEvent(mPrintMsgs and mPrintOT, "Order Ticket", msg);
                 return null;
         end;
 
@@ -170,7 +171,7 @@ begin
             // Limit order
             case "LMT", "LIMIT":  // Verified
                 ordTicket.Type = OrderType.Limit;
-                ordTicket.LimitPrice = pPrimaryValue + pSecondaryValue * tickSize;
+                ordTicket.LimitPrice = pPrimaryValue + pSecondaryValue * mTickSize;
                 ordTicket.LimitPriceStyle = PriceStyle.None;
                 ordTicket.LimitPriceOffset = 0;
                 ordTicket.StopPrice = 0;
@@ -228,7 +229,7 @@ begin
                 ordTicket.LimitPrice = 0;
                 ordTicket.LimitPriceStyle = PriceStyle.None;
                 ordTicket.LimitPriceOffset = 0;
-                ordTicket.StopPrice = pPrimaryValue + pSecondaryValue * tickSize;
+                ordTicket.StopPrice = pPrimaryValue + pSecondaryValue * mTickSize;
                 ordTicket.StopPriceStyle = PriceStyle.None;
                 ordTicket.StopPriceOffset = 0;
                 break;
@@ -254,12 +255,12 @@ begin
                 ordTicket.StopPriceStyle = PriceStyle.None;
                 ordTicket.StopPriceOffset = 0;
                 ordTicket.TrailingStop = TrailingStopBehavior.Points;
-                ordTicket.TrailingStopAmount = pSecondaryValue * tickSize;
+                ordTicket.TrailingStopAmount = pSecondaryValue * mTickSize;
                 break;
 
             default:  // Verified
                 msg = string.Format("WARNING: Unknown order ticket type '{0}'.  No order ticket was created.", pOrderType);
-                value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+                value1 = LogEvent(mPrintMsgs and mPrintOT, "Order Ticket", msg);
 
                 //  Clean up the created OrderTicket before returning
                 ordTicket = null;
@@ -271,10 +272,10 @@ begin
 
         // ELCFormatOrderTicket(OrderTicket, DecimalPlaces)
         msg = ELCFormatOrderTicket(ordTicket, 2);
-        value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+        value1 = LogEvent(mPrintMsgs and mPrintOT, "Order Ticket", msg);
 
     catch(Exception ex)
-        value1 = LogEvent(PrintMsgs and PrintOT, "Exception", ex.Message);
+        value1 = LogEvent(mPrintMsgs and mPrintOT, "Exception", ex.Message);
     end;
 
     return ordTicket;
@@ -286,19 +287,19 @@ end;
 //--------------------------------------------------------------------------------
 // Pull the dependency variables from AppStorage
 if AppStorage.Contains("printMsgs") then
-    PrintMsgs = AppStorage["printMsgs"] astype bool
+    mPrintMsgs = AppStorage["printMsgs"] astype bool
 else
 begin
     value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printMsgs' not found in AppStorage. Disabling OT logging.");
-    PrintMsgs = false;
+    mPrintMsgs = false;
 end;
 
 if AppStorage.Contains("printOT") then
-    PrintOT = AppStorage["printOT"] astype bool
+    mPrintOT = AppStorage["printOT"] astype bool
 else
 begin
     value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printOT' not found in AppStorage. Disabling OT logging.");
-    printOT = false;
+    mprintOT = false;
 end;
 
 oOrdTicket = CreateOrderTicket(iName, iAccount, iSymbol, iSecurityType, iAction, iQuantity, iPrimaryValue, iOrderType, iDuration, iSecondaryValue);

@@ -17,6 +17,7 @@ HISTORY
 Date        Version     Task
 ---------   --------    ---------------------------------------------------------------------------
 07/10/21    01.00.00    Snaggs - Created
+10/29/24    01.01.00    Snaggs - Updated naming convention on module level variables
 
 ---------------------------------------------------------------------------------------------------
 TO DO LIST
@@ -40,9 +41,9 @@ input:
 var:
     DateTime dt(null),
 
-    bool PrintMsgs(false),
-    bool PrintOT(false),
-    bool InputsValid(true);
+    bool mPrintMsgs(false),
+    bool mPrintOT(false),
+    bool mInputsValid(true);
 
 
 method bool ELTimeIsValid(int pELTime)
@@ -52,10 +53,10 @@ var:
 begin
     // Isolate the hours
     hr = IntPortion(pELTime / 100) astype int;
-
+    
     // Isolate the minutes
     min = pELTime - hr * 100;
-
+    
     return pELTime >= 0 and hr <= 23 and min <= 59;
 end;
 
@@ -107,7 +108,7 @@ switch pTimeType
                     case "DEACT", "DEACTIVATE":
                         iOrderTicket.ActivationRules.UseActivationTime = false;
                         iOrderTicket.ActivationRules.UseDeactivationTime = true;
-                        iOrderTicket.ActivationRules.DeactivationTime = dt;
+                        iOrderTicket.ActivationRules.DeactivationTime = dt;                     
                 end;
             end;
     end;
@@ -119,7 +120,7 @@ switch pTimeType
             iffString(TokenList.Create("rel,relative").Contains(pTimeType), "Sec", "Time"),
             pTime,
             dt);
-    value1 = LogEvent(PrintMsgs and PrintOT, "Add Time Rule", msg);
+    value1 = LogEvent(mPrintMsgs and mPrintOT, "Add Time Rule", msg);        
 end;
 
 
@@ -129,50 +130,50 @@ end;
 
 // Pull the dependency variables from AppStorage
 if AppStorage.Contains("printMsgs") then
-    PrintMsgs = AppStorage["printMsgs"] astype bool
+    mPrintMsgs = AppStorage["printMsgs"] astype bool
 else
 begin
     value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printMsgs' not found in AppStorage. Disabling OT logging.");
-    PrintMsgs = false;
+    mPrintMsgs = false;
 end;
 
 if AppStorage.Contains("printOT") then
-    PrintOT = AppStorage["printOT"] astype bool
+    mPrintOT = AppStorage["printOT"] astype bool
 else
 begin
     value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printOT' not found in AppStorage. Disabling OT logging.");
-    PrintOT = false;
+    mPrintOT = false;
 end;
 
 OTAddActivationRuleTime = 0;
 
 // Internal checking
-InputsValid = true;
+mInputsValid = true;
 
 // Verify valid TimeType values, case-insensitive
 if not TokenList.Create("abs,absolute,rel,relative").Contains(iTimeType) then
 begin
-    value1 = LogEvent(PrintMsgs and PrintOT,"Adding Rule", "WARNING: TimeType must be 'Rel', 'Relative', 'Abs' or 'Absolute'. The activation rule was not added to the order.");
-    InputsValid = false;
+    value1 = LogEvent(mPrintMsgs and mPrintOT,"Adding Rule", "WARNING: TimeType must be 'Rel', 'Relative', 'Abs' or 'Absolute'. The activation rule was not added to the order.");
+    mInputsValid = false;
     OTAddActivationRuleTime = -1;
 end;
 
 // Make sure time is valid for absolute time
 if TokenList.Create("abs,absolute").Contains(iTimeType) and not ELTimeIsValid(iTime) then
 begin
-    value1 = LogEvent(PrintMsgs and PrintOT, "Adding Rule", "WARNING: Absolute time based rules must be a valid time between 0 and 2359. The activation rule was not added to the order.");
-    InputsValid = false;
+    value1 = LogEvent(mPrintMsgs and mPrintOT, "Adding Rule", "WARNING: Absolute time based rules must be a valid time between 0 and 2359. The activation rule was not added to the order.");
+    mInputsValid = false;
     OTAddActivationRuleTime = -2;
 end;
 
 // Make sure time is valid for absolute time
 if TokenList.Create("abs,absolute").Contains(iTimeType) and iTime < DateTime.Now.ELTime then
 begin
-    value1 = LogEvent(PrintMsgs and PrintOT, "Adding Rule", "WARNING: Absolute time based rules must have a time later than Now. The activation rule was not added to the order.");
-    InputsValid = false;
+    value1 = LogEvent(mPrintMsgs and mPrintOT, "Adding Rule", "WARNING: Absolute time based rules must have a time later than Now. The activation rule was not added to the order.");
+    mInputsValid = false;
     OTAddActivationRuleTime = -3;
 end;
 
 // If all parameters were ok, then call the method
-if InputsValid then
+if mInputsValid then
     AddActivationRule(iActivationType, iTimeType, iTime);
