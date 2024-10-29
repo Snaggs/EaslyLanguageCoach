@@ -18,19 +18,19 @@ This function demonstrates the use of the istype to determine the type of an obj
 ---------------------------------------------------------------------------------------------------
 HISTORY
 =======
-Date        Version        Task
----------    --------    -------------------------------------------------------------------
-            01.00.00    * Created
-07/29/17    02.00.00    * Vector header
-12/09/17    03.00.00    * Support DrawingObjects
-06/29/19    04.00.00    * Formatting of datetimes
-12/02/19    04.01.00    * Enclose strings in quotes
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+            01.00.00    Created by TradeStation
+07/29/17    02.00.00    Vector header
+12/09/17    03.00.00    Support DrawingObjects
+06/29/19    04.00.00    Formatting of datetimes
+12/02/19    04.01.00    Enclose strings in quotes
 
 ---------------------------------------------------------------------------------------------------
 TO DO LIST
 ==========
 Date        Version     Task
----------   --------    -------------------------------------------------------------------
+---------   --------    ---------------------------------------------------------------------------
 07/29/17                Add TokenList support                         
 ---------------------------------------------------------------------------------------------------
 }
@@ -52,7 +52,7 @@ inputs:
     string iCollName(stringsimple),        //    A name to associated with the initial collection
     object iColl(objectsimple),            //    The top collection object
     int iDepth(numericsimple),             //    Current depth - normally 0 for initial call
-    int iIndent(numericsimple);            //    Number of spaces to indent eavh level (collection within a collection)
+    int iIndent(numericsimple);            //    Number of spaces to indent each level (collection within a collection)
 #endregion
 
 variables:
@@ -176,7 +176,7 @@ begin
 end;
 
 {
-Thie method can be used during debugging to print out a dictionary's contents
+This method can be used during debugging to print out a dictionary's contents
 }
 method void PrintDictionary(string dictName, Dictionary dtp, int depth)
 variables:
@@ -226,7 +226,7 @@ begin
             end
             
             //---------------------------------------------------------------------------------------------------
-            //    Value is an DrawingObject
+            //    Value is a DrawingObject
             //---------------------------------------------------------------------------------------------------
             else if dtp[Key] istype DrawingObject then
             begin
@@ -234,7 +234,7 @@ begin
             end
             
             //---------------------------------------------------------------------------------------------------
-            //    Value is an DateTime
+            //    Value is a DateTime
             //---------------------------------------------------------------------------------------------------
             else if dtp[Key] istype DateTime then
             begin
@@ -270,7 +270,7 @@ begin
 end;
 
 {
-Thie method can be used during debugging to print out a dictionary's contents
+This method can be used during debugging to print out a dictionary's contents
 }
 method void PrintGlobalDictionary(string dictName, GlobalDictionary dtp, int depth)
 variables:
@@ -311,7 +311,7 @@ begin
             end
             
             //---------------------------------------------------------------------------------------------------
-            //    Value is an DrawingObject
+            //    Value is a DrawingObject
             //---------------------------------------------------------------------------------------------------
             else if dtp[Key] istype DrawingObject then
             begin
@@ -319,7 +319,7 @@ begin
             end
             
             //---------------------------------------------------------------------------------------------------
-            //    Value is an DateTime
+            //    Value is a DateTime
             //---------------------------------------------------------------------------------------------------
             else if dtp[Key] istype DateTime then
             begin
@@ -417,7 +417,7 @@ begin
     DOType = dobj.GetType().ToString().ToLower();
     
     //---------------------------------------------------------------------------------------------------
-    //    trendline
+    //    Trendline
     //---------------------------------------------------------------------------------------------------
     if DOType.Contains("trendline") then
     begin
