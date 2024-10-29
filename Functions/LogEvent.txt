@@ -1,0 +1,71 @@
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            LogEvent
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Used to log messages to the PrintLog
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+11/29/21    01.00.00    Snaggs - Created
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+
+using elsystem;
+
+input:
+    iLogPrint(TrueFalseSimple),
+    iAction(StringSimple),
+    iText(StringSimple);
+
+var:
+    string mSymbol("Sym=?");
+
+//--------------------------------------------------------------------------------
+//   Log event
+//--------------------------------------------------------------------------------
+method void ToPrintLog(string pText, string pAction)
+var:
+    string msg;
+begin
+    try
+        // Log event to Print Log
+        msg = string.Format("{0:MM/dd/yy HH:mm:ss} | {1,-17} | {2,-22} | {3}",
+            DateTime.Now,
+            mSymbol.SubString(0, MinList(mSymbol.Length, 17)),
+            pAction.SubString(0, MinList(pAction.Length, 22)),
+            pText);
+        print(msg);
+
+    catch(Exception ex);
+        print("LogEvent exception: ", ex.Message);
+    end;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Main section
+//--------------------------------------------------------------------------------
+if AppStorage.Contains("symbol") then
+    mSymbol = AppStorage["symbol"] astype string;
+
+if iLogPrint then
+    ToPrintLog(iText, iAction);
+
+LogEvent = 0
