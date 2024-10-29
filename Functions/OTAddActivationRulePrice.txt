@@ -1,0 +1,189 @@
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            OTAddActivationRulePrice
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Used to add a price based activation rule to an OrderTicket
+
+Use the Triggers dialog to specify the price pattern that will trigger a Stop or If Touched order.
+This feature is designed to help the trader mitigate the risk of a bad price tick triggering a
+stop order inadvertently.
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+07/10/21    01.00.00    Snaggs - Created
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+
+using elsystem;
+using tsdata.trading;
+
+input:
+    OrderTicket iOrderTicket(ObjectRef),
+    iSymbol(StringSimple),
+    iPrice(NumericSimple),
+    iComparisonOperator(StringSimple),
+    iTrigger(StringSimple),
+    iLogicalOperator(StringSimple);
+
+var:
+    bool PrintMsgs(false),
+    bool PrintOT(false);
+
+method void AddActivationRule(string pSymbol, double pPrice, string pComparisonOperator, string pTrigger, string pLogicalOperator)
+var:
+    PriceActivationRule par,
+    string msg;
+begin
+    // Rule
+    par = new PriceActivationRule();
+
+    switch(pComparisonOperator.Trim().ToUpper())
+    begin
+        case "GT":
+            par.ComparisonOperator = ComparisonOperator.Greater;
+        case "GE":
+            par.ComparisonOperator = ComparisonOperator.GreaterEqual;
+        case "LT":
+            par.ComparisonOperator = ComparisonOperator.Less;
+        case "LE":
+            par.ComparisonOperator = ComparisonOperator.LessEqual;
+        default:
+            msg = string.Format("WARNING: Unknown PriceComparison '{0}'.  Valid values are: 'GT', 'GE', 'LT', 'LE'.", pComparisonOperator);
+            value1 = LogEvent(PrintMsgs and PrintOT, "Add Price Rule", msg);
+    end;
+
+{
+    Notes: See the following URL for information on triggers.
+    help.tradestation.com/09_05/ENG/tradestationhelp/ob/oe_pref_all_triggers.htm
+
+    The below trigger types (single, double, and twice) also allow you to specify the type of tick, number, and pattern of ticks that will trigger
+    a specific row of an activation rule. Bid/Ask and Ask/Bid triggers use the comparison operator (>/>= or </<=) for the row to determine which
+    type of tick to compare.
+
+    Stop/If Touched Trigger Types
+        - Controls the TradeStation order server settings for stop order trigger types for all asset classes.
+            - Select an item from the drop-down list to use as the trigger for a Stop or If Touched order.
+            - For equities:
+                - NYSE/AMEX - Select an item from the drop-down list to use as the trigger for an Equities Stop or If Touched order for these markets.
+                - Nasdaq/Nasdaq Small Cap - Select an item from the drop-down list to use as the trigger for an Equities Stop or If Touched order for
+                  these markets.
+
+    Definitions
+
+    Bid/Ask and Ask/Bid triggers use your order side (Buy/Cover or Sell/Sell Short) to determine which tick price to use:
+        - Stop orders = Bid/Ask = Sell on Bid tick/Buy on Ask tick
+        - Stop orders = Ask/Bid = Sell on Ask tick/Buy on Bid tick
+        - If Touched orders = Bid/Ask = Buy on Ask tick/Sell on Bid tick
+        - If Touched orders = Ask/Bid = Buy on Bid tick/Sell on Ask tick
+    A Double Trade Tick (DTT) refers to two consecutive ticks, and Twice Trade Tick (TTT) refers to two ticks (can be non-consecutive) within
+    the same trading day.
+    NBBO refers to National Best Bid and Offer (Offer means Ask).
+
+    When working with multi-leg options orders, there are no trade ticks, so natural pricing is used.
+}
+
+    switch(pTrigger.Trim().ToUpper())
+    begin
+        case "DAB":
+            par.Trigger = OrderTriggerType.DAB;     // Double Ask/Bid Tick
+        case "DBA":
+            par.Trigger = OrderTriggerType.DBA;     // Double Bid/Ask Tick
+        case "DTT":
+            par.Trigger = OrderTriggerType.DTT;     // Double Trade Tick
+        case "DTTN":
+            par.Trigger = OrderTriggerType.DTTN;    // Double Trade Tick NBBO
+        case "SAB":
+            par.Trigger = OrderTriggerType.SAB;     // Single Ask/Bid Tick
+        case "SBA":
+            par.Trigger = OrderTriggerType.SBA;     // Single Bid/Ask Tick
+        case "STT":
+            par.Trigger = OrderTriggerType.STT;     // Single Trade Tick (Selected by default)
+        case "STTN":
+            par.Trigger = OrderTriggerType.STTN;    // Single Trade Tick NBBO
+        case "TAB":
+            par.Trigger = OrderTriggerType.TAB;     // Twice Ask/Bid Tick
+        case "TBA":
+            par.Trigger = OrderTriggerType.TBA;     // Twice Bid/Ask Tick
+        case "TTT":
+            par.Trigger = OrderTriggerType.TTT;     // Twice Trade Tick
+        case "TTTN":
+            par.Trigger = OrderTriggerType.TTTN;    // Twice Trade Tick NBBO
+        default:
+            msg = string.Format("WARNING: Unknown Trigger '{0}'.  Valid values are: 'DAB', 'DBA', 'DTT', 'DTTN', 'SAB', 'SBA', 'STT', 'STTN', 'TAB', 'TBA', 'TTT', 'TTTN'.", pTrigger);
+            value1 = LogEvent(PrintMsgs and PrintOT, "Adding Price Rule", msg);
+    end;
+
+    // LogicalOperator defaults to AND if it's not set
+    switch(pLogicalOperator.Trim().ToUpper())
+    begin
+        case "AND":
+            par.LogicalOperator = LogicalOperator.And;
+        case "OR":
+            par.LogicalOperator = LogicalOperator.Or;
+        default:
+            msg = string.Format("WARNING: Unknown LogicalOperator '{0}'.  Valid values are: 'AND', 'OR'.", pLogicalOperator);
+            value1 = LogEvent(PrintMsgs and PrintOT, "Adding Price Rule", msg);
+    end;
+
+    par.Name = string.Format("PAR {0} {1} {2} {3} {4}",
+                pSymbol,
+                pPrice,
+                pComparisonOperator,
+                pTrigger,
+                pLogicalOperator);
+    par.Symbol = pSymbol;
+    par.Price = pPrice;
+    iOrderTicket.ActivationRules.Rules.Add(par);
+
+    msg = string.Format("Sym={0} Price={1} Compare={2} Trig={3} LogOp={4}",
+            iSymbol,
+            pPrice,
+            pComparisonOperator,
+            pTrigger,
+            pLogicalOperator);
+    value1 = LogEvent(PrintMsgs and PrintOT, "Adding Price Rule", msg);
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Main section
+//--------------------------------------------------------------------------------
+
+// Pull the dependency variables from AppStorage
+if AppStorage.Contains("printMsgs") then
+    PrintMsgs = AppStorage["printMsgs"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printMsgs' not found in AppStorage. Disabling OT logging.");
+    PrintMsgs = false;
+end;
+
+if AppStorage.Contains("printOT") then
+    PrintOT = AppStorage["printOT"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printOT' not found in AppStorage. Disabling OT logging.");
+    PrintOT = false;
+end;
+
+AddActivationRule(iSymbol, iPrice, iComparisonOperator, iTrigger, iLogicalOperator);
+
+// No need to pass the object back after the rule is added since it was passed by ObjectRef
+OTAddActivationRulePrice = 0;

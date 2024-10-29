@@ -1,0 +1,178 @@
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            OTAddActivationRuleTime
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Used to add a time based activation rule to an OrderTicket
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+07/10/21    01.00.00    Snaggs - Created
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+
+using elsystem;
+using tsdata.common;
+using tsdata.trading;
+
+input:
+    OrderTicket iOrderTicket(ObjectRef),
+    string iActivationType(StringSimple),   // "ACTIVATE", "DEACTIVATE"
+    string iTimeType(StringSimple),         // "RELATIVE", "ABSOLUTE"
+    int iTime(NumericSimple);
+
+var:
+    DateTime dt(null),
+
+    bool PrintMsgs(false),
+    bool PrintOT(false),
+    bool InputsValid(true);
+
+
+method bool ELTimeIsValid(int pELTime)
+var:
+    int hr,
+    int min;
+begin
+    // Isolate the hours
+    hr = IntPortion(pELTime / 100) astype int;
+
+    // Isolate the minutes
+    min = pELTime - hr * 100;
+
+    return pELTime >= 0 and hr <= 23 and min <= 59;
+end;
+
+
+method void AddActivationRule(string pActivationType, string pTimeType, int pTime)
+var:
+    DateTime dt,
+    string msg;
+begin
+
+pActivationType = pActivationType.Trim().ToUpper();
+pTimeType = pTimeType.Trim().ToUpper();
+
+switch pTimeType
+    begin
+
+        case "ABS", "ABSOLUTE": // Absolute time
+
+            dt = DateTime.FromELDateAndTime(CurrentDate, pTime);
+
+            switch pActivationType
+            begin
+                case "ACT", "ACTIVATE":
+                    iOrderTicket.ActivationRules.UseActivationTime = true;
+                    iOrderTicket.ActivationRules.UseDeactivationTime = false;
+                    iOrderTicket.ActivationRules.ActivationTime = dt;
+
+                case "DEACT", "DEACTIVATE":
+                    iOrderTicket.ActivationRules.UseActivationTime = false;
+                    iOrderTicket.ActivationRules.UseDeactivationTime = true;
+                    iOrderTicket.ActivationRules.DeactivationTime = dt;
+            end;
+
+        case "REL", "RELATIVE": // Relative time
+
+            if pTime > 0 then
+            begin
+                // Calculate the end time
+                dt = DateTime.Now;
+                dt.AddSeconds(pTime);
+
+                switch pActivationType
+                begin
+                    case "ACT", "ACTIVATE":
+                        iOrderTicket.ActivationRules.UseActivationTime = true;
+                        iOrderTicket.ActivationRules.UseDeactivationTime = false;
+                        iOrderTicket.ActivationRules.ActivationTime = dt;
+
+                    case "DEACT", "DEACTIVATE":
+                        iOrderTicket.ActivationRules.UseActivationTime = false;
+                        iOrderTicket.ActivationRules.UseDeactivationTime = true;
+                        iOrderTicket.ActivationRules.DeactivationTime = dt;
+                end;
+            end;
+    end;
+
+    msg = string.Format("OrdTyp={0} ActTyp={1} Typ={2} {3}={4} Date={5}",
+            iOrderTicket.Type.ToString(),
+            pACtivationType.ToLower(),
+            iffString(TokenList.Create("rel,relative").Contains(pTimeType), "rel", "abs"),
+            iffString(TokenList.Create("rel,relative").Contains(pTimeType), "Sec", "Time"),
+            pTime,
+            dt);
+    value1 = LogEvent(PrintMsgs and PrintOT, "Add Time Rule", msg);
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Main section
+//--------------------------------------------------------------------------------
+
+// Pull the dependency variables from AppStorage
+if AppStorage.Contains("printMsgs") then
+    PrintMsgs = AppStorage["printMsgs"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printMsgs' not found in AppStorage. Disabling OT logging.");
+    PrintMsgs = false;
+end;
+
+if AppStorage.Contains("printOT") then
+    PrintOT = AppStorage["printOT"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printOT' not found in AppStorage. Disabling OT logging.");
+    PrintOT = false;
+end;
+
+OTAddActivationRuleTime = 0;
+
+// Internal checking
+InputsValid = true;
+
+// Verify valid TimeType values, case-insensitive
+if not TokenList.Create("abs,absolute,rel,relative").Contains(iTimeType) then
+begin
+    value1 = LogEvent(PrintMsgs and PrintOT,"Adding Rule", "WARNING: TimeType must be 'Rel', 'Relative', 'Abs' or 'Absolute'. The activation rule was not added to the order.");
+    InputsValid = false;
+    OTAddActivationRuleTime = -1;
+end;
+
+// Make sure time is valid for absolute time
+if TokenList.Create("abs,absolute").Contains(iTimeType) and not ELTimeIsValid(iTime) then
+begin
+    value1 = LogEvent(PrintMsgs and PrintOT, "Adding Rule", "WARNING: Absolute time based rules must be a valid time between 0 and 2359. The activation rule was not added to the order.");
+    InputsValid = false;
+    OTAddActivationRuleTime = -2;
+end;
+
+// Make sure time is valid for absolute time
+if TokenList.Create("abs,absolute").Contains(iTimeType) and iTime < DateTime.Now.ELTime then
+begin
+    value1 = LogEvent(PrintMsgs and PrintOT, "Adding Rule", "WARNING: Absolute time based rules must have a time later than Now. The activation rule was not added to the order.");
+    InputsValid = false;
+    OTAddActivationRuleTime = -3;
+end;
+
+// If all parameters were ok, then call the method
+if InputsValid then
+    AddActivationRule(iActivationType, iTimeType, iTime);

@@ -1,0 +1,306 @@
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            OTCreate
+Type:            Function (Simple)
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Contains methods to create an OrderTicket and do the logging
+
+Auto Price Styles
+=================
+Join - Buy at Bid or Sell at Ask
+Improve - Buy at Bid + nMinMoves or Sell at Ask -nMinMoves where n is in ticks
+Split - Buy or Sell at (Bid + Ask) / 2
+Shave - Buy at Ask -nMinMoves or Sell at Bid +nMinMoves where n is in ticks
+Hit/Take - Buy at Ask or Sell at Bid
+Hit/Take+ - Buy at Ask +nMinMoves or Sell at Bid -nMinMoves where n is in ticks
+
+IfTouched - Advanced order parameter used to specify a price that, when touched, will send the
+    selected type of order to the market. This is only available for Market and Limit orders
+
+PriceStyle can be changed for Limit and Stop orders after the OrderTicket is created.
+To do so, requires setting the PriceStyle and the PriceStyleOffset.
+This works for Limit and Stop orders.
+To change a Stop Order, set StopPriceStyle = PriceStyle.Shave, set StopPriceOffset = +/- value in
+    ticks after the call to OTCreate() is made.
+To change a Limit Order, set LimitPriceStyle = PriceStyle.Shave, set LimitPriceOffset = +/- value
+    in ticks after the call to OTCreate() is made.
+These auto-price styles can be tricky with the offset value being positive or negative.  Sometimes
+    the offset + or - is not always what you think it is.  When using these, they should be
+    thoroughly tested before trading them live!
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+05/27/21    01.00.00    Snaggs - Created
+02/11/22    01.00.01    Snaggs - Added PriceStyle comments in documentation
+07/20/22    01.00.02    Snaggs - Set Order.OrderName from OrderTicket.OrderName (10 Update 65)
+08/04/22    01.00.03    Snaggs - Removed variable msg and an unused string format
+                                 Fixed warning 'return expected or not all control paths return
+                                 a value'
+08/07/22    01.00.04    Snaggs - Set routing to Intelligent and other non-common properties to
+                                 their default values.
+12/01/22    01.00.05    Snaggs - Capped Order.OrderName to 15 characters
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+
+using elsystem;
+using tsdata.common;
+using tsdata.trading;
+
+input:
+    string iName(StringSimple),
+    string iAccount(StringSimple),
+    string iSymbol(StringSimple),
+    SecurityType iSecurityType(ObjectSimple),
+    string iAction(StringSimple),       // Buy, BuyToCover, Sell, SellShort
+    int iQuantity(NumericSimple),
+    double iPrimaryValue(NumericSimple),
+    string iOrderType(StringSimple),    // Limit, Market, StopLimit, StopMarket
+    string iDuration(StringSimple),     // DAY, FOK, GTC
+    double iSecondaryValue(NumericSimple),
+    OrderTicket oOrdTicket(ObjectRef);
+
+var:
+    bool PrintMsgs(false),
+    bool PrintOT(false),
+
+    double tickSize(MinMove / PriceScale);
+
+
+//--------------------------------------------------------------------------------
+//   Create order ticket
+//--------------------------------------------------------------------------------
+method OrderTicket CreateOrderTicket(
+    string pName,
+    string pAccount,
+    string pSymbol,
+    SecurityType pSecurityType,
+    string pAction,     // Buy, BuyToCover, Sell, SellShort
+    int pQuantity,
+    double pPrimaryValue,
+    string pOrderType,  // Limit, Market, StopLimit, StopMarket, etc
+    string pDuration,   // DAY, FOK, GTC, etc
+    double pSecondaryValue)
+var:
+    OrderAction ordAction,
+    OrderTicket ordTicket,
+    string methodName,
+    string msg;
+begin
+    try
+        // Translate actions
+        switch pAction.Trim().ToUpper()
+        begin
+            case "BUY":
+                ordAction = OrderAction.Buy;
+                break;
+
+            case "BTC", "BUYTOCOVER":
+                ordAction = OrderAction.BuyToCover;
+                break;
+
+            case "SELL":
+                ordAction = OrderAction.Sell;
+                break;
+
+            case "SS", "SELLSHORT":
+                ordAction = OrderAction.SellShort;
+                break;
+
+            default:
+                msg = string.Format("WARNING: Unknown order ticket action '{0}'.  No order ticket was created.", pAction);
+                value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+                return null;
+        end;
+
+        ordTicket = new OrderTicket();
+        ordTicket.Account = pAccount;
+        ordTicket.Action = ordAction;
+        ordTicket.Duration = pDuration;
+        ordTicket.Name = pName;
+        ordTicket.Quantity = pQuantity;
+        ordTicket.Symbol = pSymbol;
+        ordTicket.SymbolType = pSecurityType;
+
+        // Set other non-common values to their default values
+        ordTicket.Route = "Intelligent";
+        ordTicket.AllOrNone = false;
+        //ordTicket.BookOnly = false; // Won't send the ticket if this is active
+        ordTicket.ConverTinvalidStopToMarket = false;
+        ordTicket.Discretionary = false;
+        ordTicket.DurationDate = null;
+        ordTicket.ECNSweep = false;
+        ordTicket.IfTouched = false;
+        ordTicket.IfTouchedPrice = 0.00;
+        ordTicket.IfTouchedPriceOffset = 0;
+        ordTicket.IfTouchedPriceStyle = PriceStyle.None;
+        ordTicket.NonDisplay = false;
+        ordTicket.Peg = PegBehavior.Off;
+        //ordTicket.PostOnly = false; // Available to clients on maker-taker commission plans.
+        ordTicket.ShowOnly = false;
+        ordTicket.ShowOnlyQuantity = 0;
+
+        switch pOrderType.Trim().ToUpper()
+        begin
+            // Market order
+            case "MKT", "MARKET":  // Verified
+                ordTicket.Type = OrderType.Market;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Limit order
+            case "LMT", "LIMIT":  // Verified
+                ordTicket.Type = OrderType.Limit;
+                ordTicket.LimitPrice = pPrimaryValue + pSecondaryValue * tickSize;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Limit order, linked to parent order
+            case "LMT-PP", "LIMIT-PP":  // Verified
+                ordTicket.Type = OrderType.Limit;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.ParentPlus;
+                ordTicket.LimitPriceOffset = pSecondaryValue astype int;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Fixed stop, fixed limit
+            case "STPLMT", "STOPLIMIT":  // Verified
+                ordTicket.Type = OrderType.StopLimit;
+                ordTicket.LimitPrice = pSecondaryValue;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = pPrimaryValue;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Fixed Stop, offset limit
+            case "STPLMT-SP", "STOPLIMIT-SP":  // Verified
+                ordTicket.Type = OrderType.StopLimit;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.StopPlus;
+                ordTicket.LimitPriceOffset = pSecondaryValue astype int;
+                ordTicket.StopPrice = pPrimaryValue;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Offset Stop, offset limit, linked to parent order
+            case "STPLMT-PP-SP", "STOPLIMIT-PP-SP":  // Verified
+                ordTicket.Type = OrderType.StopLimit;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.StopPlus;
+                ordTicket.LimitPriceOffset = pSecondaryValue astype int;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.ParentPlus astype int;
+                ordTicket.StopPriceOffset = pPrimaryValue astype int;
+                break;
+
+            // Offset stop market
+            case "STPMKT", "STOPMARKET":  // Verified
+                ordTicket.Type = OrderType.StopMarket;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = pPrimaryValue + pSecondaryValue * tickSize;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                break;
+
+            // Stop market, linked to parent order
+            case "STPMKT-PP", "STOPMARKET-PP":  // Verified
+                ordTicket.Type = OrderType.StopMarket;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.ParentPlus astype int;
+                ordTicket.StopPriceOffset = pSecondaryValue astype int;
+                break;
+
+            // Trailing stop
+            case "TSTP", "TRLSTP", "TRAILINGSTOP":  // Verified
+                ordTicket.Type = OrderType.StopMarket;
+                ordTicket.LimitPrice = 0;
+                ordTicket.LimitPriceStyle = PriceStyle.None;
+                ordTicket.LimitPriceOffset = 0;
+                ordTicket.StopPrice = 0;
+                ordTicket.StopPriceStyle = PriceStyle.None;
+                ordTicket.StopPriceOffset = 0;
+                ordTicket.TrailingStop = TrailingStopBehavior.Points;
+                ordTicket.TrailingStopAmount = pSecondaryValue * tickSize;
+                break;
+
+            default:  // Verified
+                msg = string.Format("WARNING: Unknown order ticket type '{0}'.  No order ticket was created.", pOrderType);
+                value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+
+                //  Clean up the created OrderTicket before returning
+                ordTicket = null;
+                return null;
+        end;
+
+        // Set the order name from the order ticket. Limit is 15 chars.
+        //ordTicket.OrderName = LeftStr(ordTicket.Name, 15);
+
+        // ELCFormatOrderTicket(OrderTicket, DecimalPlaces)
+        msg = ELCFormatOrderTicket(ordTicket, 2);
+        value1 = LogEvent(PrintMsgs and PrintOT, "Order Ticket", msg);
+
+    catch(Exception ex)
+        value1 = LogEvent(PrintMsgs and PrintOT, "Exception", ex.Message);
+    end;
+
+    return ordTicket;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Main section
+//--------------------------------------------------------------------------------
+// Pull the dependency variables from AppStorage
+if AppStorage.Contains("printMsgs") then
+    PrintMsgs = AppStorage["printMsgs"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printMsgs' not found in AppStorage. Disabling OT logging.");
+    PrintMsgs = false;
+end;
+
+if AppStorage.Contains("printOT") then
+    PrintOT = AppStorage["printOT"] astype bool
+else
+begin
+    value1 = LogEvent(true, "AppStorage Chk", "WARNING: 'printOT' not found in AppStorage. Disabling OT logging.");
+    printOT = false;
+end;
+
+oOrdTicket = CreateOrderTicket(iName, iAccount, iSymbol, iSecurityType, iAction, iQuantity, iPrimaryValue, iOrderType, iDuration, iSecondaryValue);
+
+OTCreate = 0;

@@ -1,0 +1,1956 @@
+{
+---------------------------------------------------------------------------------------------------
+IDENTIFICATION
+==============
+Name:            Sample Order Tickets
+Type:            Indicator
+TS Version:      9.5 Build 17 or later
+
+---------------------------------------------------------------------------------------------------
+DOCUMENTATION
+=============
+Used to test many different order ticket types.
+
+Disclaimer
+==========
+I have made every attempt to ensure the accuracy and reliability of the information provided in
+this application.  However, the information is provided "as-is" without warranty of any kind. I do
+not accept any responsibility or liability for the accuracy, content, completeness, legality, or
+reliability of the information contained in this application.
+
+No warranties, promises and/or representations of any kind, expressed or implied, are given as to
+the nature, standard, accuracy or otherwise of the information provided in this application nor the
+suitability or otherwise of the information to your particular circumstances.
+
+I shall not be liable for any loss of damage or whatever nature (direct, indirect, consequential or
+other) which may arise as a result of your use of this application, or from your use of the
+information in this application.
+
+---------------------------------------------------------------------------------------------------
+HISTORY
+=======
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+07/10/21    01.00.00    Snaggs - Created
+12/08/21    01.00.01    Snaggs - Corrected several comments
+                               - Fixed code alignment in OrderEventHandler
+                               - Removed several unused variables
+02/11/22    01.00.02    Snaggs - Set form title bar to Sample Order Tickets
+                               - Got rid of local logging variables and use input variables instead
+                               - Added printOP to control display of OrdersProvider logging
+                               - Added iAccount input and logic to use GetAccountId if blank
+                               - Added account filtering on OrdersProvider and PositionsProvider
+                               - Added symbol filtering on OrdersProvider and PositionsProvider
+                               - Added logging of Account and Symbols being used for providers
+                               - Account & Symbol filtering were added to limit the cancel, close
+                                    and show orders actions to a single account and symbol
+
+---------------------------------------------------------------------------------------------------
+TO DO LIST
+==========
+Date        Version     Task
+---------   --------    ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------------------------------
+}
+
+using elsystem;
+using elsystem.collections;
+using elsystem.windows.forms;
+using tsdata.common;
+using tsdata.marketdata;
+using tsdata.trading;
+
+input:
+    string iAccount(""),
+    bool iPrintMsgs(true),
+    bool iPrintOP(true),
+    bool iPrintOT(true),
+    bool iPrintPP(true);
+
+const:
+    string APPVERSION("1.0.2");
+
+var:
+    // Contains the order types to select from the form
+    Dictionary LongBrackets(null),
+    Dictionary LongOCOs(null),
+    Dictionary ShortBrackets(null),
+    Dictionary ShortOCOs(null),
+
+    // Providers
+    OrdersProvider OP(null),
+    PositionsProvider PP(null),
+
+    double TickSize(MinMove / PriceScale),
+
+    string AccountID("");
+
+
+//--------------------------------------------------------------------------------
+//   Create orders provider
+//--------------------------------------------------------------------------------
+#region OrdersProvider
+method OrdersProvider CreateOrdersProvider(string pName, string pAccounts, string pSymbols, string pStates)
+var:
+    OrdersProvider op,
+    string msg;
+begin
+    msg = string.Format("Name={0}", pName);
+    value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Creating", msg);
+
+    // Set the properties
+    op = new OrdersProvider();
+    op.Name = pName;
+    op.Accounts += pAccounts;
+    op.States += pStates;
+    op.Symbols += pSymbols;
+    op.Realtime = true;
+    op.TimeZone = ELSystem.TimeZone.Local;
+
+    // Register event handlers
+    op.StateChanged += OP_StateChanged;
+    op.Updated += OP_Updated;
+
+    return op;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Orders provider state changed event handler
+//--------------------------------------------------------------------------------
+method void OP_StateChanged(Object sender, StateChangedEventArgs args)
+var:
+    Order ord,
+    OrdersProvider source,
+
+    int idx,
+
+    string msg;
+begin
+    source = sender astype OrdersProvider;
+
+    switch source.State
+    begin
+        case DataState.Failed:
+            msg = string.Format("Name={0} St={1}", source.Name, source.State.ToString());
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_StateChanged", msg);
+            RaiseRunTimeError("OP Load failed");
+
+        case DataState.Loaded:
+            msg = string.Format("Name={0} St={1} Cnt={2} AcctFltr={3}",
+                    source.Name,
+                    source.State.ToString(),
+                    source.Count,
+                    source.Accounts);
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Loaded", msg);
+
+        case DataState.Loading:
+            msg = string.Format("Name={0} St={1}", source.Name, source.State.ToString());
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Loading", msg);
+
+        case DataState.Unloaded:
+            msg = IffString(source = null, "", string.Format("Name={0} St={1}", source.Name, source.State.ToString()));
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Unloaded", msg);
+    end;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Orders provider updated event handler
+//--------------------------------------------------------------------------------
+method void OP_Updated(Object sender, OrderUpdatedEventArgs args)
+var:
+    Order ord,
+    OrdersProvider source,
+
+    string msg;
+begin
+    source = sender astype OrdersProvider;
+    ord = args.Order;
+
+    switch args.Reason
+    begin
+        case OrderUpdateReason.Added:
+            // New Position processing
+            msg = string.Format("Name={0} Rsn={1} {2}",
+                    source.Name,
+                    args.Reason.ToString(),
+                    ELCFormatOrder(ord, 2, false));
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Added", msg);
+
+        case OrderUpdateReason.InitialUpdate:
+            msg = string.Format("Name={0} Rsn={1} Cnt={2}",
+                    source.Name,
+                    args.Reason.ToString(),
+                    source.Count);
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_InitialUpdate", msg);
+
+        case OrderUpdateReason.Removed:
+            // Position has gone flat
+            msg = string.Format("Name={0} Rsn={1} {2}",
+                    source.Name,
+                    args.Reason.ToString(),
+                    ELCFormatOrder(ord, 2, false));
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_Removed", msg);
+
+        case OrderUpdateReason.StateChanged:
+            // Updated Position processing
+            msg = string.Format("Name={0} Rsn={1} {2}",
+                    source.Name,
+                    args.Reason.ToString(),
+                    ELCFormatOrder(ord, 2, false));
+            value1 = LogEvent(iPrintMsgs and iPrintOP, "OP_StateChanged", msg);
+    end;
+end;
+#endregion
+
+//--------------------------------------------------------------------------------
+//   Order updated event handler
+//--------------------------------------------------------------------------------
+#region OrderEventHandler
+method void Order_Updated(object sender, OrderUpdatedEventArgs args)
+var:
+    Order ord,
+    string msg;
+begin
+    ord = sender astype Order;
+
+    msg = string.Format("Rsn={0} {1}",
+            args.Reason.ToString(),
+            ELCFormatOrder(ord, 2, false));
+
+    value1 = LogEvent(iPrintMsgs and iPrintOT, "Order_Updated", msg);
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Show orders
+//--------------------------------------------------------------------------------
+method void ShowOrders(OrdersProvider pOP)
+var:
+    Order ord,
+
+    int idx,
+
+    string msg;
+begin
+    for idx = 0 to pOP.Count - 1
+    begin
+        Ord = pOP[idx];
+
+        // Order details
+        msg = string.Format("{0,3:N0} | {1}",
+                idx,
+                ELCFormatOrder(Ord, 2, false));
+        value1 = LogEvent(iPrintMsgs and iPrintOP, "ShowOrders", msg);
+    end;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Create positions provider
+//--------------------------------------------------------------------------------
+#region PositionsProvider
+method PositionsProvider CreatePositionsProvider(string pName, string pAccounts, string pSymbols)
+var:
+    PositionsProvider pp,
+    string msg;
+begin
+    msg = string.Format("Name={0}", pName);
+    value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Creating", msg);
+
+    // Set the properties
+    pp = new PositionsProvider();
+    pp.Accounts += pAccounts;
+    pp.Name = pName;
+    pp.Symbols += pSymbols;
+    pp.Realtime = true;
+    pp.Timezone = ELSystem.TimeZone.Local;
+
+    // Register event handlers
+    pp.StateChanged += PP_StateChanged;
+    pp.Updated += PP_Updated;
+
+    return pp;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Positions provider state changed event handler
+//--------------------------------------------------------------------------------
+method void PP_StateChanged(Object sender, StateChangedEventArgs args)
+var:
+    PositionsProvider source,
+    Position psn,
+
+    int idx,
+
+    string msg;
+begin
+    source = sender astype PositionsProvider;
+
+    switch source.State
+    begin
+        case DataState.Failed:
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Failed", source.Name);
+            RaiseRunTimeError("PP Load failed");
+            break;
+
+        case DataState.Loaded:
+            msg = string.Format("Name={0} Cnt={1} AcctFltr={2} SymFltr={3}",
+                    source.Name,
+                    source.Count,
+                    source.Accounts,
+                    source.Symbols);
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Loaded", msg);
+
+            // Check if there are open positions or not
+            if source.Count = 0 then
+            begin
+                msg = string.Format("Name={0}", "No open positions were found.");
+                value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Loaded", msg);
+            end
+            else
+            begin
+                for idx = 0 to source.Count - 1
+                begin
+                    psn = source[idx];
+
+                    // Position information
+                    // ELCFormatPosition(Position, DecimalPlaces, ShowPL, ShowCost, ShowMargin)
+                    msg = string.Format("{0,2:N0} | {1}",
+                            idx,
+                            ELCFormatPosition(psn, 2, true, true, true));
+                    value1 = LogEvent(iPrintMsgs and iPrintPP, "Position item", msg);
+                end;
+            end;
+            break;
+
+        case DataState.Loading:
+            msg = string.Format("Name={0}", source.Name);
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Loading", msg);
+            break;
+
+        case DataState.Unloaded:
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Unloaded", source.Name);
+            break;
+    end;
+end;
+
+
+//--------------------------------------------------------------------------------
+//   Positions provider updated event handler
+//--------------------------------------------------------------------------------
+method void PP_Updated(Object sender, PositionUpdatedEventArgs args)
+var:
+    Position psn,
+    PositionsProvider source,
+
+    string msg;
+begin
+    source = sender astype PositionsProvider;
+    psn = args.Position;
+
+    switch args.Reason
+    begin
+        case PositionUpdateReason.InitialUpdate:
+            msg = string.Format("Name={0} Cnt={1}",
+                    source.Name,
+                    source.Count);
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_InitialUpdate", msg);
+            break;
+
+        case PositionUpdateReason.Removed:
+            // Position has gone flat
+            msg = string.Format("Name={0} {1}",
+                    source.Name,
+                    ELCFormatPosition(psn, 2, true, true, true));
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Removed", msg);
+            break;
+
+        case PositionUpdateReason.Added:
+            // New position processing
+            // ELCFormatPosition(Position, DecimalPlaces, ShowPL, ShowCost, ShowMargin)
+            msg = string.Format("Name={0} {1}",
+                    source.Name,
+                    ELCFormatPosition(psn, 2, true, true, true));
+            value1 = LogEvent(iPrintMsgs and iPrintPP, "PP_Added", msg);
+            break;
+
+        case PositionUpdateReason.RealtimeUpdate:
+            // ELCFormatPosition(Position, DecimalPlaces, ShowPL, ShowCost, ShowMargin)
+            msg = string.Format("Name={0} {1}",
+                    source.Name,
+                    ELCFormatPosition(psn, 2, true, false, false));
+            value1 = LogEvent(iPrintMsgs and iPrintPP And False, "PP_RealtimeUpdate", msg);
+    end;
+end;
+#endregion
+
+//--------------------------------------------------------------------------------
+//   Long OCO orders
+//--------------------------------------------------------------------------------
+#region LongOCOOrders
+method Orders LongOCOOrders(string pAccount, string pSymbol, SecurityType pSecurityType, int pType)
+var:
+    DateTime dt,
+
+    OCOOrderTicket oco,
+    OCOOrderTicket oco2,
+    OCOOrderTicket oco3,
+
+    OSOOrderTicket oso,
+    OSOOrderTicket oso2,
+
+    Orders ords,
+
+    OrderTicket otEntry,
+    OrderTicket otEntry2,
+    OrderTicket otStop,
+    OrderTicket otStop2,
+    OrderTicket otTarget,
+    OrderTicket otTarget2,
+
+    int idx;
+begin
+    switch(pType)
+    begin
+        //--------------------------------------------------------------------------------
+        //   Simple buy orders
+        //--------------------------------------------------------------------------------
+        case 0: // Verified
+            // Entry - Single Order - Long
+            // Buy Market at current price
+            value1 = OTCreate("Buy Mkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "mkt", "gtc", 0, otEntry);
+            ords = otEntry.Send(true);
+
+        case 1: // Verified
+            // Entry - Single Order - Long
+            // Buy Limit at current price
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", 0, otEntry);
+            ords = otEntry.Send(true);
+
+        case 2: // Verified
+            // Entry - Single Order - Long
+            // Buy Limit offset 10 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+            ords = otEntry.Send(true);
+
+        case 3: // Verified
+            // Entry - Single Order - Long
+            // Buy Stop Market offset 5 ticks
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+            ords = otEntry.Send(true);
+
+        case 4: // Verified
+            // Entry - Single Order - Long
+            // Buy Stop Close + 10 ticks, Limit Close + 15 ticks
+            value1 = OTCreate("Buy StpLmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close + 10 * TickSize, "stplmt", "gtc", Close + 15 * TickSize, otEntry);
+            ords = otEntry.Send(true);
+
+        case 5: // Verified
+            // Entry - Single Order - Long
+            // Buy Stop Close + 2.5 points, Limit StopPlus offset 5 ticks
+            value1 = OTCreate("Buy StpLmt SP", pAccount, pSymbol, pSecurityType, "buy", 1, Close + 2.5, "stplmt-sp", "gtc", 5, otEntry);
+            ords = otEntry.Send(true);
+
+        case 6: // Verified
+            // Entry - Single Order - Long
+            // Buy Trailing Stop 12 ticks (Trailing stops are in ticks and always positive)
+            value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "buy", 1, 0, "tstp", "gtc", 12, otEntry);
+            ords = otEntry.Send(true);
+
+
+        //--------------------------------------------------------------------------------
+        //   OSO - Buy with 1 stop
+        //--------------------------------------------------------------------------------
+        case 10: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only
+            // Buy Limit, Sell Stop Market offset 15 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", 0, otEntry);
+                value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt", "gtc", -15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 11: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only
+            // Buy Limit offset 5 ticks, Sell Stop Market ParentPlus offset 15 ticks from primary fill
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -5, otEntry);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, 0, "stpmkt-pp", "gtc", -15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 12: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only
+            // Buy Limit offset 10 ticks, Sell Stop Close - 15 ticks, Limit Close - 10 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell StpLmt", pAccount, pSymbol, pSecurityType, "sell", 1, Close - 15 * TickSize, "stplmt", "gtc", Close - 10 * TickSize, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 13: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only
+            // Buy Limit 10 ticks, Sell Stop Close - 15 ticks, Limit StopPlus offset 5 ticks from stop
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell StpLmt SP", pAccount, pSymbol, pSecurityType, "sell", 1, Close - 15 * TickSize, "stplmt-sp", "gtc", 5, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 14: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only
+            // Buy Limit offset 10 ticks, Sell Stop ParentPlus offset 15 ticks from primary fill, Limit StopPlus offset 5 ticks from stop
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell StpLmt PP SP", pAccount, pSymbol, pSecurityType, "sell", 1, -15, "stplmt-pp-sp", "gtc", 5, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 15: // Verified
+            // Entry - Single Order - Long with Exit - Stop Only (Trailing)
+            // Buy Market, Sell Trailing Stop offset 15 ticks (Trailing stops are in ticks and always positive)
+            value1 = OTCreate("Buy Mkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "mkt", "gtc", 0, otEntry);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, 0, "tstp", "gtc", 15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO/OSO - Buy with stops and targets
+        //--------------------------------------------------------------------------------
+        case 20: // Verified
+            // Entry - Single Order - Long with Exit - OCO - 1 Limit & 1 Stop Level
+            // Buy Limit offset 10 ticks, Sell Limit ParentPlus offset 50 ticks from primary fill, Sell Stop ParentPlus offset 25 ticks from primary fill
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            ords = oso.Send(true);
+
+        case 21: // Verified
+            // Entry - Single Order - Long with Exit - OCO - 1 Limit & 1 Stop Level
+            // Buy Limit offset 10 ticks, Sell Limit ParentPlus offset 50 ticks from primary fill, Sell Trailing Stop 25 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            ords = oso.Send(true);
+
+        case 22: // Verified
+            // Entry - Single Order - Long with Exit - OCO - 2 Limit & 1 Stop Level
+            // Buy Limit 2x offset 10 ticks, Sell 1x Limit ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by buying 2, then creating 2 exit orders, where the stop price is the same for both but they have different limit prices
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 2, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // Sell Limit 1x ParentPlus offset 70 ticks from primary fill, Sell Stop 1x ParentPlus offset 25 ticks from primary fill
+            // This has the same stop price as the order above (-25), but a different price for the limit order (70)
+            value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 70, otTarget2);
+            value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+            oso.SecondaryTickets.Add(oco2);
+
+            ords = oso.Send(true);
+
+        case 23: // Verified
+            // Entry - Single Order - Long with Exit - OCO - 1 Limit & 2 Stop Level
+            // Buy Limit 2x offset 10 ticks, Sell 1x ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by buying 2, then creating 2 exit orders, where the limit price is the same for both, but they have different stop prices
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 2, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // Sell Limit 1x ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 35 ticks from primary fill
+            // This has the same target limit as the order above (50), but a different stop value (-35)
+            value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget2);
+            value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -35, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+            oso.SecondaryTickets.Add(oco2);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO - Breakout (Buy Stop/Sell Stop)
+        //--------------------------------------------------------------------------------
+        case 30: // Verified
+            // Entry - OCO Breakout (Buy Stop/Sell Stop) - with No Exit Order
+            // Buy Stop offset 10 ticks, Sell Stop offset 10 ticks
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 10, otEntry);
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -10, otEntry2);
+
+            // OCO group for Buy Stop and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otEntry);
+            oco.Siblings.Add(otEntry2);
+
+            ords = oco.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   Activation / Deactivation tickets
+        //--------------------------------------------------------------------------------
+        case 40: // Verified
+            // Entry - Single Order - Long with Exit
+            // Absolute time activation rule
+            // Time is in ELTime (HHMM, no seconds)
+            // Activate the Sell Stop at the end of the day 1459
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "day", -10, otEntry);
+                value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "mkt", "day", 0, otStop);
+                value1 = OTAddActivationRuleTime(otStop, "act", "abs", 1459);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 41: // Verified
+            // Entry - Single Order - Long with Exit
+            // Relative time activation rule
+            // Activate Buy in 15 seconds, Activate Sell Stop 15 seconds after that
+            // Time starts counting when the order is sent, not when it's filled
+            value1 = OTCreate("Buy Mkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "mkt", "day", 0, otEntry);
+            value1 = OTAddActivationRuleTime(otEntry, "act", "rel", 15);
+                value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "mkt", "day", 0, otStop);
+                value1 = OTAddActivationRuleTime(otStop, "act", "rel", 30);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   Time Deactivation tickets are only good for the day, so a "DAY" type order
+        //   must be used if you want the order to change to expired.
+        //   If "DAY" is not used, then the order will change to queued when it expires.
+        //--------------------------------------------------------------------------------
+        case 42: // Verified
+            // Entry - Single Order - Long with Exit
+            // Time is in ELTime (HHMM, no seconds)
+            // Absolute time deactivation rule
+            value1 = OTCreate("Buy Mkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "mkt", "day", 0, otEntry);
+                value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt", "day", 10, otStop);
+
+                // Create an absolute time in the future.  Relative already does this, but this is just to test the functionality
+                // Adding 1 minute will set the expiration time to the start of the next minute
+                // If the time is 13:45:22 and 1 minute is added, the expiration time will be 13:46:00
+                dt = DateTime.Now;
+                dt.AddMinutes(1);
+                value1 = OTAddActivationRuleTime(otStop, "deact", "abs", dt.ELTime);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 43: // Verified
+            // Entry - Single Order - Long with Exit
+            // Relative time deactivation rule
+            // Buy deactivation rule if order is not filled within 10 seconds
+            // Time starts counting when the order is sent, not when it's filled
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "day", -10, otEntry);
+            value1 = OTAddActivationRuleTime(otEntry, "deact", "rel", 10);
+                value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "mkt", "gtc", 0, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   Price rule tickets
+        //--------------------------------------------------------------------------------
+        case 44:
+            // Entry - Single Order - Long with Exit
+            // Add price activation rule
+            // Enable the Buy Stop order when the price is 3 ticks below the Close of the Buy Stop
+            // See advanced column of TradeManager for details
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 6, otEntry);
+            value1 = OTAddActivationRulePrice(otEntry, pSymbol, Close - 3 * TickSize, "lt", "stt", "and");
+
+            ords = otEntry.Send(true);
+
+        case 45:
+            // Entry - Single Order - Long with Exit
+            // Add multiple price activation rules
+            // Enable the Buy Market when the (price is 10 ticks under the Close and $VIX.X > 12) or (TLT < 146.50)
+            // See advanced column of TradeManager for details
+            // Note: Default logical operation is AND, and needs to be set on the first rule if others are to be added
+            // You may have to adjust prices on $VIX and TLT to get the order to fill, but you can see the order in the TradeManger
+            value1 = OTCreate("Buy Mkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "mkt", "gtc", 0, otEntry);
+            value1 = OTAddActivationRulePrice(otEntry, pSymbol, Close - 10 * TickSize, "lt", "stt", "and");
+            value1 = OTAddActivationRulePrice(otEntry, "$VIX.X", 12, "gt", "stt", "or");
+            value1 = OTAddActivationRulePrice(otEntry, "TLT", 146.50, "le", "stt", "and");
+
+            ords = otEntry.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO breakout orders
+        //--------------------------------------------------------------------------------
+        case 50: // Verified
+            // Entry - OCO Breakout (Buy Stop/Sell Stop) with Exit - Stop Only
+            // Buy Stop offset 10 ticks from current price, Sell Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 10, otEntry);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -10, otStop);
+
+            // OSO group for entry and exit ticket
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            // Sell Stop offset 10 ticks from current price, Buy Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -10, otEntry2);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 10, otStop2);
+
+            // OSO group for entry and exit ticket
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(otStop2);
+
+            // OCO group for Buy Stop and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+
+        case 51: // Verified
+            // Entry - OCO Breakout (Buy Stop/Sell Stop) with Exit - OCO - 1 Limit & 1 Stop Level
+            // Buy Stop 5 ticks from current price, Sell Limit ParentPlus offset 20 ticks from primary fill, Sell Stop Market ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 20, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -10, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            // Sell Stop 5 ticks from current price, Buy Limit ParentPlus offset 20 ticks from primary fill, Buy Stop Market ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry2);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -20, otTarget2);
+                value1 = OTCreate("Buy StmMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 10, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(oco2);
+
+            // OCO group for Buy Stop and Sell Stop tickets
+            oco3 = new OCOOrderTicket();
+            oco3.Siblings.Add(oso);
+            oco3.Siblings.Add(oso2);
+
+            ords = oco3.Send(true);
+
+        case 52: // Verified
+            // Entry - OCO Breakout (Buy Stop/Sell Stop) with Exit - OCO - 1 Limit & 1 Trailing Stop Level
+            // Buy Stop offset 5 ticks from current price, Sell Limit ParentPlus offset 20 ticks from entry fill, Sell Trailing Stop offset 10 ticks
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 20, otTarget);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 10, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            // Sell Stop offset 5 ticks from current price, Buy Limit ParentPlus offset 20 ticks from entry fill, Buy Trailing Stop offset 10 ticks
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry2);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -20, otTarget2);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 10, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(oco2);
+
+            // OCO Group for Buy Stop and Sell Stop tickets
+            oco3 = new OCOOrderTicket();
+            oco3.Siblings.Add(oso);
+            oco3.Siblings.Add(oso2);
+
+            ords = oco3.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO breakout/fade orders
+        //--------------------------------------------------------------------------------
+        case 53: // Verified
+            // Entry - OCO Breakout/Fade Buy (Buy Limit/Buy Stop) - No Exit
+            // Buy Stop 5 ticks from current price, Buy Limit 5 ticks from current price
+            // FOMO Entry - Try to get the better price from the limit order, but take the stop price if the price moves up
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -5, otEntry2);
+
+            // OCO group for Buy Limit and Buy Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otEntry);
+            oco.Siblings.Add(otEntry2);
+
+            ords = oco.Send(true);
+
+        case 54: // Verified
+            // Entry - OCO Breakout/Fade Buy (Buy Limit/Buy Stop) with Exit - Stop Only
+            // Buy Stop offset 10 ticks from current price, Sell Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 10, otEntry);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -10, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            // Buy Limit offset 10 ticks from current price, Sell Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry2);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -10, otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(otStop2);
+
+            // OCO group for Buy Limit and Buy Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+
+        case 55: // Verified
+            // Entry - OCO Breakout/Fade Buy (Buy Limit/Buy Stop) with Exit - Stop Only (Trailing)
+            // Buy Stop offset 10 ticks from current price, Sell Trailing Stop offset 10 ticks
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 10, otEntry);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 10, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            // Buy Limit offset 10 ticks from current price, Sell Trailing Stop offset 10 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry2);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 10, otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(otStop2);
+
+            // OCO group for Buy Limit and Buy Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+    end;
+
+    // Assign each OrderTicket to the Order_Updated event handler
+    for idx = 0 to ords.Count - 1
+    begin
+        ords[idx].Updated += Order_Updated;
+    end;
+
+    return ords;
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Long bracket orders
+//--------------------------------------------------------------------------------
+#region LongBracketOrders
+method Orders LongBracketOrders(string pAccount, string pSymbol, SecurityType pSecurityType, int pType)
+var:
+    BracketOrderTicket bot,
+    BracketOrderTicket bot2,
+
+    OCOOrderTicket oco,
+
+    Orders ords,
+
+    OrderTicket otEntry,
+    OrderTicket otEntry2,
+    OrderTicket otStop,
+    OrderTicket otStop2,
+    OrderTicket otTarget,
+    OrderTicket otTarget2,
+
+    OSOOrderTicket oso,
+    OSOOrderTicket oso2,
+
+    int idx;
+begin
+    switch(pType)
+    begin
+        //--------------------------------------------------------------------------------
+        //   Bracket/OSO - Buy with stops and targets
+        //--------------------------------------------------------------------------------
+        case 20: // Verified
+            // Entry - Single Order - Long with Exit - Bracket - 1 Limit & 1 Stop Level
+            // Buy Limit offset 10 ticks, Sell Target ParentPlus offset 50 ticks, Sell Stop ParentPlus offset 25 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            ords = oso.Send(true);
+
+        case 21: // Verified
+            // Entry - Single Order - Long with Exit - Bracket - 1 Limit & 1 Stop Level
+            // Buy Limit offset 10 ticks, Sell Limit ParentPlus offset 50 ticks, Sell Trailing Stop 25 ticks
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            ords = oso.Send(true);
+
+        case 22: // Verified
+            // Entry - Single Order - Long with Exit - Bracket - 2 Limit & 1 Stop Level
+            // Buy Limit 2x offset 10 ticks, Sell 1x Limit ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by buying 2, then creating 2 exit orders, where the stop price is the same for both but they have different limit prices
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 2, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // Sell 1x Limit ParentPlus offset 70 ticks from primary fill, Sell 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This has the same stop point as the order above (-25), but a different target for the limit order (70)
+            value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 70, otTarget2);
+            value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+            oso.SecondaryTickets.Add(bot2);
+
+            ords = oso.Send(true);
+
+        case 23: // Verified
+            // Entry - Single Order - Long with Exit - Bracket - 1 Limit & 2 Stop Level
+            // Buy Limit 2x offset 10 ticks, Sell 1x Limit ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by buying 2, then creating 2 exit orders, where the limit target value is the same for both, but they have different stops
+            value1 = OTCreate("Buy Lmt", pAccount, pSymbol, pSecurityType, "buy", 2, Close, "lmt", "gtc", -10, otEntry);
+                value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget);
+                value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // Sell 1x Limit ParentPlus offset 50 ticks from primary fill, Sell 1x Stop ParentPlus offset 35 ticks from primary fill
+            // This has the same target limit as the order above (50), but a different stop value (-35)
+            value1 = OTCreate("Sell Lmt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 50, otTarget2);
+            value1 = OTCreate("Sell StpMkt PP", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -35, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+            oso.SecondaryTickets.Add(bot2);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO breakouts
+        //--------------------------------------------------------------------------------
+        case 51: // Verified
+            // Entry Long - OCO Breakout (Buy Stop/Sell Stop) with Exit - Bracket - 1 Limit & 1 Stop Level
+            // Buy Limit offset 5 ticks, Sell Limit ParentPlus offset 20 ticks form primary fill, Sell Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+                value1 = OTCreate("Sell Limit", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 20, otTarget);
+                value1 = OTCreate("Sell Stop", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "stpmkt-pp", "gtc", -10, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            // Entry Short: Sell Stop offset 5 ticks from Close, Buy Limit ParentPlus offset 20 ticks from primary fill, Buy Stop ParentPlus 10 ticks from primary fill
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry2);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -20, otTarget2);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 10, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(bot2);
+
+            // OCO group for Buy Stop and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+
+        case 52: // Verified
+            // Entry Long - OCO Breakout (Buy Stop/Sell Stop) with Exit - Bracket - 1 Limit & 1 Trailing Stop Level
+            // Buy Stop offset 5 ticks, Sell Limit ParentPlus offset 20 ticks from primary fill, Sell Trail Stop 10 ticks
+            value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "buy", 1, Close, "stpmkt", "gtc", 5, otEntry);
+                value1 = OTCreate("Sell Limit", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "lmt-pp", "gtc", 20, otTarget);
+                value1 = OTCreate("Sell Stop", pAccount, pSymbol, pSecurityType, "sell", 1, Close, "tstp", "gtc", 10, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            // Entry Short: Sell Stop 5 ticks, Buy Limit ParentPlus offset 20 ticks from primary fill, Buy Trail Stop 10 ticks
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry2);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -20, otTarget2);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 10, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(bot2);
+
+            // OCO group for Buy Stop and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+    end;
+
+    // Assign each OrderTicket to the Order_Updated event handler
+    for idx = 0 to ords.Count - 1
+    begin
+        ords[idx].Updated += Order_Updated;
+    end;
+
+    return ords;
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Short OCO orders
+//--------------------------------------------------------------------------------
+#region ShortOCOOrders
+method Orders ShortOCOOrders(string pAccount, string pSymbol, SecurityType pSecurityType, int pType)
+var:
+    OCOOrderTicket oco,
+    OCOOrderTicket oco2,
+
+    OSOOrderTicket oso,
+    OSOOrderTicket oso2,
+
+    Orders ords,
+
+    OrderTicket otEntry,
+    OrderTicket otEntry2,
+    OrderTicket otStop,
+    OrderTicket otStop2,
+    OrderTicket otTarget,
+    OrderTicket otTarget2,
+
+    int idx;
+begin
+    switch(pType)
+    begin
+        //--------------------------------------------------------------------------------
+        //   Simple short orders
+        //--------------------------------------------------------------------------------
+        case 0: // Verified
+            // Entry - Single Order - Short
+            // Sell Market at current price
+            value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "mkt", "gtc", 0, otEntry);
+            ords = otEntry.Send(true);
+
+        case 1: // Verified
+            // Entry - Single Order - Short
+            // Sell Limit at current price
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 0, otEntry);
+            ords = otEntry.Send(true);
+
+        case 2: // Verified
+            // Entry - Single Order - Short
+            // Sell Limit offset 10 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+            ords = otEntry.Send(true);
+
+        case 3: // Verified
+            // Entry - Single Order - Short
+            // Sell Stop Market offset 5 ticks
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry);
+            ords = otEntry.Send(true);
+
+        case 4: // Verified
+            // Entry - Single Order - Short
+            // Sell Stop Close - 10 ticks, Limit Close - 15 ticks
+            value1 = OTCreate("Sell StpLmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close - 10 * TickSize, "stplmt", "gtc", Close - 15 * TickSize, otEntry);
+            ords = otEntry.Send(true);
+
+        case 5: // Verified
+            // Entry - Single Order - Short
+            // Sell Stop Close - 2.5 points, Limit StopPlus offset 5 ticks
+            value1 = OTCreate("Sell StpLmt SP", pAccount, pSymbol, pSecurityType, "ss", 1, Close - 2.5, "stplmt-sp", "gtc", -5, otEntry);
+            ords = otEntry.Send(true);
+
+        case 6: // Verified
+            // Entry - Single Order - Short
+            // Sell Trailing Stop 12 ticks (Trailing stops are in ticks and always positive)
+            value1 = OTCreate("Sell TStp", pAccount, pSymbol, pSecurityType, "ss", 1, 0, "tstp", "gtc", 12, otEntry);
+            ords = otEntry.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OSO - Sell with 1 stop
+        //--------------------------------------------------------------------------------
+        case 10: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only
+            // Sell Limit, Buy Stop Market offset 15 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 0, otEntry);
+                value1 = OTCreate("Buy StpMkt", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt", "gtc", 15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 11: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only
+            // Sell Limit offset 5 ticks, Buy Stop Market ParentPlus offset 15 ticks from primary fill
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 5, otEntry);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, 0, "stpmkt-pp", "gtc", 15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 12: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only
+            // Sell Limit offset 10 ticks, Buy Stop Close + 15 ticks, Limit Close + 10 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy StpLmt", pAccount, pSymbol, pSecurityType, "btc", 1, Close + 15 * TickSize, "stplmt", "gtc", Close + 10 * TickSize, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 13: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only
+            // Sell Limit 10 ticks, Buy Stop Close + 15 ticks, Limit StopPlus offset 5 ticks from stop
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy StpLmt SP", pAccount, pSymbol, pSecurityType, "btc", 1, Close + 15 * TickSize, "stplmt-sp", "gtc", 5, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 14: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only
+            // Sell Limit offset 10 ticks, Buy Stop ParentPlus offset 15 ticks from primary fill, Limit StopPlus offset 5 ticks from stop
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy StpLmt PP SP", pAccount, pSymbol, pSecurityType, "btc", 1, 15, "stplmt-pp-sp", "gtc", 5, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        case 15: // Verified
+            // Entry - Single Order - Short with Exit - Stop Only (Trailing)
+            // Sell Market, Buy Trailing Stop 15 ticks (Trailing stops are in ticks and always positive)
+            value1 = OTCreate("Sell Mkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "mkt", "gtc", 0, otEntry);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, 0, "tstp", "gtc", 15, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            ords = oso.Send(true);
+
+        //--------------------------------------------------------------------------------
+        //   OCO/OSO - Sell with stops and targets
+        //--------------------------------------------------------------------------------
+        case 20: // Verified
+            // Entry - Single Order - Short with Exit - OCO - 1 Limit & 1 Stop Level
+            // Sell Limit offset 10 ticks, Buy Limit ParentPlus offset 50 ticks from primary fill, Buy Stop ParentPlus offset 25 ticks from primary fill
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            ords = oso.Send(true);
+
+        case 21: // Verified
+            // Entry - Single Order - Short with Exit - OCO - 1 Limit & 1 Stop Level
+            // Sell Limit offset 10 ticks, Buy Limit ParentPlus offset 50 ticks from primary fill, Buy Trailing Stop 25 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+
+            ords = oso.Send(true);
+
+        case 22: // Verified
+            // Entry - Single Order - Short with Exit - OCO - 2 Limit & 1 Stop Level
+            // Sell Limit 2x offset 10 ticks, Buy 1x Limit ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by selling 2, then creating 2 exit orders, where the stop price is the same for both but they have different limit prices
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 2, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // Buy Limit 1x ParentPlus offset 70 ticks from primary fill, Buy Stop 1x ParentPlus offset 25 ticks from primary fill
+            // This has the same stop price as the order above (+25), but a different price for the limit order (-70)
+            value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -70, otTarget2);
+            value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+            oso.SecondaryTickets.Add(oco2);
+
+            ords = oso.Send(true);
+
+        case 23: // Verified
+            // Entry - Single Order - Short with Exit - OCO - 1 Limit & 2 Stop Level
+            // Sell Limit 2x offset 10 ticks, Buy 1x ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to buy, then scale out in the exits in whatever multiple you want
+            // This order works by selling 2, then creating 2 exit orders, where the limit price is the same for both, but they have different stop prices
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 2, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StpMkt PPt", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // OCO group for stop and target tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otTarget);
+            oco.Siblings.Add(otStop);
+
+            // Buy Limit 1x ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 35 ticks from primary fill
+            // This has the same target limit as the order above (-50), but a different stop value (+35)
+            value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget2);
+            value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 35, otStop2);
+
+            // OCO group for stop and target tickets
+            oco2 = new OCOOrderTicket();
+            oco2.Siblings.Add(otTarget2);
+            oco2.Siblings.Add(otStop2);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(oco);
+            oso.SecondaryTickets.Add(oco2);
+
+            ords = oso.Send(true);
+
+
+        //--------------------------------------------------------------------------------
+        //   OCO breakout/fade orders
+        //--------------------------------------------------------------------------------
+        case 53: // Verified
+            // Entry - OCO Breakout/Fade Sell (Sell Limit/Sell Stop) - No Exit
+            // Sell Limit 5 ticks from current price, Sell Stop 5 ticks below current price
+            // FOMO Entry - Try to get the better price from the limit order, but take the stop price if the price moves down
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 5, otEntry);
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -5, otEntry2);
+
+            // OCO group for Sell Limit and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(otEntry);
+            oco.Siblings.Add(otEntry2);
+
+            ords = oco.Send(true);
+
+        case 54: // Verified
+            // Entry - OCO Breakout/Fade Sell (Sell Limit/Sell Stop) with Exit - Stop Only
+            // Sell Stop offset 10 ticks from current price, Buy Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Sell StpMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -10, otEntry);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 10, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            // Sell Limit 10 ticks from current price, Buy Stop ParentPlus offset 10 ticks from primary fill
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry2);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 10, otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(otStop2);
+
+            // OCO group for Sell Limit and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+
+        case 55: // Verified
+            // Entry - OCO Breakout/Fade Sell (Sell Limit/Sell Stop) with Exit - Stop Only (Trailing)
+            // Sell Stop offset 10 ticks from current price, Buy Trailing Stop offset 10 ticks
+            value1 = OTCreate("Sell SptMkt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "stpmkt", "gtc", -10, otEntry);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 10, otStop);
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(otStop);
+
+            // Sell Limit offset 10 ticks from current price, Buy Trailing Stop offset 10 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry2);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 10, otStop2);
+
+            // OSO group for entry and exit tickets
+            oso2 = new OSOOrderTicket();
+            oso2.PrimaryTicket = otEntry2;
+            oso2.SecondaryTickets.Add(otStop2);
+
+            // OCO group for Sell Limit and Sell Stop tickets
+            oco = new OCOOrderTicket();
+            oco.Siblings.Add(oso);
+            oco.Siblings.Add(oso2);
+
+            ords = oco.Send(true);
+    end;
+
+    // Assign each OrderTicket to the Order_Updated event handler
+    for idx = 0 to ords.Count - 1
+    begin
+        ords[idx].Updated += Order_Updated;
+    end;
+
+    return ords;
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Short bracket orders
+//--------------------------------------------------------------------------------
+#region ShortBracketOrders
+method Orders ShortBracketOrders(string pAccount, string pSymbol, SecurityType pSecurityType, int pType)
+var:
+    BracketOrderTicket bot,
+    BracketOrderTicket bot2,
+
+    OCOOrderTicket oco,
+
+    Orders ords,
+
+    OrderTicket otEntry,
+    OrderTicket otEntry2,
+    OrderTicket otStop,
+    OrderTicket otStop2,
+    OrderTicket otTarget,
+    OrderTicket otTarget2,
+
+    OSOOrderTicket oso,
+
+    int idx;
+begin
+    switch(pType)
+    begin
+        //--------------------------------------------------------------------------------
+        //   Bracket/OSO - Buy with stops and targets
+        //--------------------------------------------------------------------------------
+        case 20: // Verified
+            // Entry - Single Order - Short with Exit - Bracket - 1 Limit & 1 Stop Level
+            // Sell Limit offset 10 ticks, Buy Limit ParentPlus offset 50 ticks, Buy Stop ParentPlus offset 25 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            ords = oso.Send(true);
+
+        case 21: // Verified
+            // Entry - Single Order - Short with Exit - Bracket - 1 Limit & 1 Stop Level
+            // Sell Limit offset 10 ticks, Buy Limit ParentPlus offset 50 ticks, Buy Trailing Stop 25 ticks
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 1, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy TStp", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "tstp", "gtc", 25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+
+            ords = oso.Send(true);
+
+        case 22: // Verified
+            // Entry - Single Order - Short with Exit - Bracket - 2 Limit & 1 Stop Level
+            // Sell Limit 2x offset 10 ticks, Buy 1x Limit ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to sell, then scale out in the exits in whatever multiple you want
+            // This order works by selling 2, then creating 2 exit orders, where the stop price is the same for both but they have different limit prices
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 2, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StopMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // Buy 1x Limit ParentPlus offset 70 ticks from primary fill, Buy 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This has the same stop point as the order above (25), but a different target for the limit order (-70)
+            value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -70, otTarget2);
+            value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+            oso.SecondaryTickets.Add(bot2);
+
+            ords = oso.Send(true);
+
+        case 23: // Verified
+            // Entry - Single Order - Short with Exit - Bracket - 1 Limit & 2 Stop Level
+            // Sell Limit 2x offset 10 ticks, Buy 1x Limit ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 25 ticks from primary fill
+            // This order requires more than 1 share/contract in the first order to sell, then scale out in the exits in whatever multiple you want
+            // This order works by selling 2, then creating 2 exit orders, where the limit target value is the same for both, but they have different stops
+            value1 = OTCreate("Sell Lmt", pAccount, pSymbol, pSecurityType, "ss", 2, Close, "lmt", "gtc", 10, otEntry);
+                value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget);
+                value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 25, otStop);
+
+            // Bracket group for entry and exit tickets
+            bot = new BracketOrderTicket();
+            bot.Target.PrimaryTicket = otTarget;
+            bot.Protection.PrimaryTicket = otStop;
+
+            // Buy 1x Limit ParentPlus offset 50 ticks from primary fill, Buy 1x Stop ParentPlus offset 35 ticks from primary fill
+            // This has the same target limit as the order above (-50), but a different stop value (35)
+            value1 = OTCreate("Buy Lmt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "lmt-pp", "gtc", -50, otTarget2);
+            value1 = OTCreate("Buy StpMkt PP", pAccount, pSymbol, pSecurityType, "btc", 1, Close, "stpmkt-pp", "gtc", 35, otStop2);
+
+            // Bracket group for entry and exit tickets
+            bot2 = new BracketOrderTicket();
+            bot2.Target.PrimaryTicket = otTarget2;
+            bot2.Protection.PrimaryTicket = otStop2;
+
+            // OSO group for entry and exit tickets
+            oso = new OSOOrderTicket();
+            oso.PrimaryTicket = otEntry;
+            oso.SecondaryTickets.Add(bot);
+            oso.SecondaryTickets.Add(bot2);
+
+            ords = oso.Send(true);
+    end;
+
+    // Assign each OrderTicket to the Order_Updated event handler
+    for idx = 0 to ords.Count - 1
+    begin
+        ords[idx].Updated += Order_Updated;
+    end;
+
+    return ords;
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Form stuff
+//--------------------------------------------------------------------------------
+#region FormStuff
+method void LoadDirectionCbo()
+begin
+    cboDirection.Clear();
+
+    cboDirection.AddItem("Long - OSO");
+    cboDirection.AddItem("Long - Bracket");
+    cboDirection.AddItem("Short - OSO");
+    cboDirection.AddItem("Short - Bracket");
+
+    // Select the first item in the list
+    cboDirection.SelectedIndex = 0;
+end;
+
+
+method void LoadOrderTypeCollections()
+var:
+    int idx;
+begin
+    // Load Dictionaries
+    LongOCOs = new Dictionary();
+
+    LongOCOs["00"] = "Buy Market";
+    LongOCOs["01"] = "Buy Limit";
+    LongOCOs["02"] = "Buy Limit Offset";
+    LongOCOs["03"] = "Buy Stop Offset";
+    LongOCOs["04"] = "Buy Stop Limit";
+    LongOCOs["05"] = "Buy Stop Limit SP";
+    LongOCOs["06"] = "Buy Trailing Stop";
+    LongOCOs["10"] = "Buy OSO Limit - 1S";
+    LongOCOs["11"] = "Buy OSO Limit - 1S PP";
+    LongOCOs["12"] = "Buy OSO Limit - 1SL";
+    LongOCOs["13"] = "Buy OSO Limit - 1SL SP";
+    LongOCOs["14"] = "Buy OSO Limit - 1SL SP PP";
+    LongOCOs["15"] = "Buy OSO Market - 1TS";
+    LongOCOs["20"] = "Buy OSO Limit - 1L PP/1S PP";
+    LongOCOs["21"] = "Buy OSO Limit - 1L PP/1TS";
+    LongOCOs["22"] = "Buy OSO Limit - 2L PP/1S PP";
+    LongOCOs["23"] = "Buy OSO Limit - 1L PP/2S PP";
+    LongOCOs["30"] = "OCO Breakout - 1BS/1SS";
+    LongOCOs["40"] = "Buy Limit - TAR ABS";
+    LongOCOs["41"] = "Buy Limit - TAR REL";
+    LongOCOs["42"] = "Buy Limit - TDR ABS";
+    LongOCOs["43"] = "Buy Limit - TDR REL";
+    LongOCOs["44"] = "Buy Limit - PAR Single";
+    LongOCOs["45"] = "Buy Limit - PAR Multiple";
+    LongOCOs["50"] = "OCO Breakout - 1S PP";
+    LongOCOs["51"] = "OCO Breakout - 1L PP/1S PP";
+    LongOCOs["52"] = "OCO Breakout - 1L PP/1TS";
+    LongOCOs["53"] = "OCO Breakout/Fade - No Exit";
+    LongOCOs["54"] = "OCO Breakout/Fade - 1S PP";
+    LongOCOs["55"] = "OCO Breakout/Fade - 1TS";
+
+    LongBrackets = new Dictionary();
+
+    LongBrackets["20"] = "Buy BRK Limit - 1L PP/1S PP";
+    LongBrackets["21"] = "Buy BRK Limit - 1L PP/1TS";
+    LongBrackets["22"] = "Buy BRK Limit - 2L PP/1S PP";
+    LongBrackets["23"] = "Buy BRK Limit - 1L PP/2S PP";
+    LongBrackets["51"] = "BRK Breakout - 1L PP/1S PP";
+    LongBrackets["52"] = "BRK Breakout - 1L PP/1TS";
+
+    ShortOCOs = new Dictionary();
+
+    ShortOCOs["00"] = "Sell Market";
+    ShortOCOs["01"] = "Sell Limit";
+    ShortOCOs["02"] = "Sell Limit Offset";
+    ShortOCOs["03"] = "Sell Stop Offset";
+    ShortOCOs["04"] = "Sell Stop Limit";
+    ShortOCOs["05"] = "Sell Stop Limit SP";
+    ShortOCOs["06"] = "Sell Trailing Stop";
+    ShortOCOs["10"] = "Sell OSO Limit - 1S";
+    ShortOCOs["11"] = "Sell OSO Limit - 1S PP";
+    ShortOCOs["12"] = "Sell OSO Limit - 1SL";
+    ShortOCOs["13"] = "Sell OSO Limit - 1SL SP";
+    ShortOCOs["14"] = "Sell OSO Limit - 1SL SP PP";
+    ShortOCOs["15"] = "Sell OSO Market - 1 TS";
+    ShortOCOs["20"] = "Sell OSO Limit - 1L PP/1S PP";
+    ShortOCOs["21"] = "Sell OSO Limit - 1L PP/1TS";
+    ShortOCOs["22"] = "Sell OSO Limit - 2L PP/1S PP";
+    ShortOCOs["23"] = "Sell OSO Limit - 1L PP/2S PP";
+    ShortOCOs["53"] = "OCO Breakout/Fade - No Exit";
+    ShortOCOs["54"] = "OCO Breakout/Fade - 1S PP";
+    ShortOCOs["55"] = "OCO Breakout/Fade - 1TS";
+
+    ShortBrackets = new Dictionary();
+
+    ShortBrackets["20"] = "Sell BRK Limit - 1L PP/1S PP";
+    ShortBrackets["21"] = "Sell BRK Limit - 1L PP/1TS";
+    ShortBrackets["22"] = "Sell BRK Limit - 2L PP/1S PP";
+    ShortBrackets["23"] = "Sell BRK Limit - 1L PP/2S PP";
+end;
+
+
+method void LoadOrderTypesCbo(string pOrderType)
+var:
+    Dictionary orderTypes,
+    int idx;
+begin
+    // Select the dictionary to load
+    switch(pOrderType)
+    begin
+        case "Long - OSO":
+            orderTypes = LongOCOs;
+
+        case "Long - Bracket":
+            orderTypes = LongBrackets;
+
+        case "Short - OSO":
+            orderTypes = ShortOCOs;
+
+        case "Short - Bracket":
+            orderTypes = ShortBrackets;
+    end;
+
+    cboOrderType.Clear();
+
+    for idx = 0 to orderTypes.Count - 1
+    begin
+        cboOrderType.AddItem(orderTypes[OrderTypes.Keys[idx].ToString()] astype string);
+    end;
+
+    // Set the default display option
+    cboOrderType.SelectedIndex = 0;
+end;
+
+
+method void LoadDockingOptionsCbo()
+begin
+    cboDocking.AddItem("Left");
+    cboDocking.AddItem("Right");
+
+    // Set the default display option or get it from AppStorage
+    if AppStorage.Contains("docking") then
+        cboDocking.SelectedIndex = AppStorage["docking"] astype int
+    else
+    begin
+        cboDocking.SelectedIndex = 0;
+        AppStorage["docking"] = cboDocking.SelectedIndex;
+    end;
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Form events
+//--------------------------------------------------------------------------------
+#region FormEvents
+method void cboDirection_SelectedIndexChanged(Object sender, EventArgs args)
+begin
+    LoadOrderTypesCbo(cboDirection.SelectedItem.ToString());
+end;
+
+
+method void cboDocking_SelectedIndexChanged(Object sender, EventArgs args)
+begin
+    if cboDocking.SelectedIndex = 0 then
+        frmMain.Dock = DockStyle.Left
+    else
+        frmMain.Dock = DockStyle.Right;
+
+    AppStorage["docking"] = cboDocking.SelectedIndex;
+end;
+
+
+method void cboOrderType_SelectedIndexChanged(Object sender, EventArgs args)
+begin
+    switch(cboDirection.SelectedItem.ToString())
+    begin
+        case "Long - OSO":
+            txtMethod.Text = string.Format("{0}({1})", "LongOCOOrders", StrToNum(LongOCOs.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Long - Bracket":
+            txtMethod.Text = string.Format("{0}({1})", "LongBracketOrders", StrToNum(LongBrackets.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Short - OSO":
+            txtMethod.Text = string.Format("{0}({1})", "ShortOCOOrders", StrToNum(ShortOCOs.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Short - Bracket":
+            txtMethod.Text = string.Format("{0}({1})", "ShortBracketOrders", StrToNum(ShortBrackets.Keys[cboOrderType.SelectedIndex] astype string));
+    end;
+end;
+
+
+method void btnSubmitOrder_Click(Object sender, EventArgs args)
+begin
+    value1 = LogEvent(iPrintMsgs and iPrintOT, "Submitting Order", txtMethod.Text);
+
+    switch(cboDirection.SelectedItem.ToString())
+    begin
+        case "Long - OSO":
+            LongOCOOrders(GetAccountId(), Symbol, Category, StrToNum(LongOCOs.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Long - Bracket":
+            LongBracketOrders(GetAccountId(), Symbol, Category, StrToNum(LongBrackets.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Short - OSO":
+            ShortOCOOrders(GetAccountId(), Symbol, Category, StrToNum(ShortOCOs.Keys[cboOrderType.SelectedIndex] astype string));
+        case "Short - Bracket":
+            ShortBracketOrders(GetAccountId(), Symbol, Category, StrToNum(ShortBrackets.Keys[cboOrderType.SelectedIndex] astype string));
+    end;
+end;
+
+
+method void btnCancelAll_Click(Object sender, EventArgs args)
+var:
+    int idx;
+begin
+    for idx = 0 to OP.Count - 1
+    begin
+        // Only cancel queued orders that were generated by the Object Model so we leave user placed orders active
+        if (OP[idx].State = OrderState.Queued or OP[idx].State = OrderState.Received) and OP[idx].OSOParentId = ""
+            and OP[idx].GeneratingApplication = GeneratingApplication.ObjectModel then
+            OP[idx].Cancel();
+    end;
+end;
+
+
+method void btnClearLog_Click(Object sender, EventArgs args)
+begin
+    ClearPrintLog();
+end;
+
+
+method void btnCloseAll_Click(Object sender, EventArgs args)
+var:
+    int idx;
+begin
+    for idx = 0 to PP.Count - 1
+    begin
+        PP[idx].Close();
+    end;
+end;
+
+
+method void btnShowOrders_Click(Object sender, EventArgs args)
+begin
+    ShowOrders(OP);
+end;
+#endregion
+
+
+//--------------------------------------------------------------------------------
+//   Main section
+//--------------------------------------------------------------------------------
+#region MainSection
+once
+begin
+    ClearPrintLog();
+
+    // If iAccount is set, the code will use it
+    // Otherwise it will get the correct account type dynamically if the symbol changes
+    // If you have more than one of the same account type, like 2 equity accounts, you should set iAccount
+    //    to the account you want it to use
+    if iAccount = "" then
+        AccountID = GetAccountID();
+
+    // Use AppStorage so we have access to these settings at all scope levels
+    AppStorage["symbol"] = Symbol;
+
+    // Logging for OrdersProvider, OrderTickets and PositionsProvider
+    AppStorage["printMsgs"] = iPrintMsgs;
+    AppStorage["printOP"] = iPrintOP;
+    AppStorage["printOT"] = iPrintOT;
+    AppStorage["printPP"] = iPrintPP;
+
+    // Filter by AccountID and Symbol so actions on this provider are limited
+    // Name, AccountIDs, Symbols, States
+    OP = CreateOrdersProvider("OP_Main", AccountID, Symbol, "");
+    OP.LoadProvider();
+
+    // Filter by AccountID and Symbol so actions on this provider are limited
+    // Name, AccountIDs, Symbols
+    PP = CreatePositionsProvider("PP_Main", AccountID, Symbol);
+    PP.LoadProvider();
+
+    // Setup data to display in controls on the form
+    LoadOrderTypeCollections();
+    LoadDirectionCbo();
+    LoadDockingOptionsCbo();
+
+    lblVersion.Text = string.Format("v{0}", APPVERSION);
+    frmMain.Show();
+    
+    value1 = LogEvent(true, "Initialized", string.Format("Acct={0} Symbols={1}", AccountID, Symbol));
+end;
+#endregion
