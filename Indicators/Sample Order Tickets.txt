@@ -1857,7 +1857,7 @@ begin
             // 14 ------------- Current price at 1st target
             // 13 ------------- 2nd target, Exit 1 at 13 and send Stage 3 order
 
-            // State 3 order
+            // Stage 3 order
             // 14 ------------- Exit 1 when trailing stop is hit
 
             // Opening sell order
