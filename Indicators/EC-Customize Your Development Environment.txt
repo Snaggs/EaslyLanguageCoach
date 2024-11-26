@@ -1,0 +1,25 @@
+{
+    Author : EasyLanguage Coach
+    Date   : 11/14/2024
+    Source : YouTube EasyLanguage Coach
+    Lesson : Customize Your Development Environment
+}
+
+{
+    Block comment
+}
+var:
+    int X(0),
+    string TradingSymbol(""),
+    string State("waiting");
+
+// Inline comment
+value1 = Average(Close, 8);
+
+X = Category;
+TradingSymbol = Symbol;
+
+Once(LastBarOnChart)
+    State = "initializing";
+
+Plot1(value1, "Avg", Magenta);
